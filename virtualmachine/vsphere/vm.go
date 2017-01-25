@@ -13,16 +13,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/apcera/libretto/ssh"
-	"github.com/apcera/libretto/util"
-	lvm "github.com/apcera/libretto/virtualmachine"
+	"github.com/avnish30jn/libretto/ssh"
+	"github.com/avnish30jn/libretto/util"
+	lvm "github.com/avnish30jn/libretto/virtualmachine"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25/types"
 
-	"golang.org/x/net/context"
+	"context"
 )
 
 type vmwareFinder struct {
@@ -50,7 +50,7 @@ type VMwareLease struct {
 // HTTPNfcLeaseProgress takes a percentage as an int and sets that percentage as
 // the completed percent.
 func (v VMwareLease) HTTPNfcLeaseProgress(p int) {
-	v.Lease.HttpNfcLeaseProgress(v.Ctx, p)
+	v.Lease.HttpNfcLeaseProgress(v.Ctx, int32(p))
 }
 
 // Wait waits for the underlying lease to finish.
@@ -310,6 +310,50 @@ type Lease interface {
 var _ lvm.VirtualMachine = (*VM)(nil)
 
 // VM represents a vSphere VM.
+
+type VM struct {
+        // Host represents the vSphere host to use for creating this VM.
+        Host string `json:"Host"`
+        // Destination represents the destination on which to clone this VM.
+        Destination Destination `json:"Destination"`
+        // Username represents the username to use for connecting to the sdk.
+        Username string `json:"Username"`
+        // Password represents the password to use for connecting to the sdk.
+        Password string `json:"Password"`
+        // Insecure allows connecting without cert validation when set to true.
+        Insecure bool `json:"Insecure"`
+        // Datacenter configures the datacenter onto which to import the VM.
+        Datacenter string `json:"Datacenter"`
+        // OvfPath represents the location of the OVF file on disk.
+        OvfPath    string `json:"OvfPath"`
+        OvaPathUrl string `json:"OvaPathUrl"`
+        // Networks defines a mapping from each network label inside the ovf file
+        // to a vSphere network. Must be available on the host or deploy will fail.
+        Networks map[string]string `json:"Networks"`
+        // Name is the name to use for the VM on vSphere and internally.
+        Name string `json:"Name"`
+        // Template is the name to use for the VM's template
+        Template string `json:"Template"`
+        // Datastores is a slice of permissible datastores. One is picked out of these.
+        Datastores []string `json:"Datastores"`
+        // Credentials are the credentials to use when connecting to the VM over SSH
+        Credentials ssh.Credentials
+        // Disks is a slice of extra disks to attach to the VM
+        Disks []Disk `json:"Disks"`
+        // QuestionResponses is a map of regular expressions to match question text
+        // to responses when a VM encounters a questions which would otherwise
+        // prevent normal operation. The response strings should be the string value
+        // of the intended response index.
+        QuestionResponses map[string]string `json:"QuestionResponses"`
+        uri               *url.URL
+        ctx               context.Context
+        cancel            context.CancelFunc
+        client            *govmomi.Client
+        finder            finder
+        collector         collector
+        datastore         string
+}
+/*
 type VM struct {
 	// Host represents the vSphere host to use for creating this VM.
 	Host string
@@ -358,7 +402,7 @@ type VM struct {
 	finder          finder
 	collector       collector
 	datastore       string
-}
+}*/
 
 // Provision provisions this VM.
 func (vm *VM) Provision() (err error) {
@@ -375,52 +419,19 @@ func (vm *VM) Provision() (err error) {
 		return fmt.Errorf("Failed to retrieve datacenter: %s", err)
 	}
 
-	// Upload a template to all the datastores if `UseLocalTemplates` is set.
-	// Otherwise pick a random datastore out of the list that was passed in.
 	var datastores = vm.Datastores
-	if !vm.UseLocalTemplates {
-		n := util.Random(1, len(vm.Datastores))
-		datastores = []string{vm.Datastores[n-1]}
-	}
 
-	usableDatastores := []string{}
 	for _, d := range datastores {
-		template := createTemplateName(vm.Template, d)
-		// Does the VM template already exist?
-		e, err := Exists(vm, dcMo, template)
+		_, err := Exists(vm, dcMo, vm.Name)
 		if err != nil {
-			return fmt.Errorf("failed to check if the template already exists: %s", err)
+			return fmt.Errorf("failed to check if the already exists: %s", err)
 		}
 
-		// If it does exist, return an error if the skip existing flag is not set
-		if e {
-			if !vm.SkipExisting {
-				return fmt.Errorf("template already exists: %s", vm.Template)
-			}
-		} else {
-			// Upload the template if  it does not exist. If it exists and SkipExisting is true,
-			// use the existing template
-			if err := uploadTemplate(vm, dcMo, d); err != nil {
-				return err
-			}
+		if err := uploadTemplate(vm, dcMo, d); err != nil {
+			return err
 		}
-		// Upload successful or the template was found with the SkipExisting flag set to true
-		usableDatastores = append(usableDatastores, d)
 	}
 
-	// Does the VM already exist?
-	e, err := Exists(vm, dcMo, vm.Name)
-	if err != nil {
-		return fmt.Errorf("failed to check if the vm already exists: %s", err)
-	}
-	if e {
-		return ErrorVMExists
-	}
-
-	err = cloneFromTemplate(vm, dcMo, usableDatastores)
-	if err != nil {
-		return fmt.Errorf("error while cloning vm from template: %s", err)
-	}
 	return
 }
 
@@ -429,6 +440,69 @@ func (vm *VM) GetName() string {
 	return vm.Name
 }
 
+func (vm *VM) AddDisk() (err error) {
+        if err := SetupSession(vm); err != nil {
+                return fmt.Errorf("Error setting up vSphere session: %s", err)
+        }
+
+        // Cancel the sdk context
+        defer vm.cancel()
+
+        // Get a reference to the datacenter with host and vm folders populated
+        dcMo, err := GetDatacenter(vm)
+        if err != nil {
+                return fmt.Errorf("Failed to retrieve datacenter: %s", err)
+        }
+
+        vmMo, err := findVM(vm, dcMo, vm.Name)
+        if err != nil {
+                return fmt.Errorf("VM not found", vm.Name, err)
+        }
+
+        if err := reconfigureVM(vm, vmMo); err != nil {
+                return fmt.Errorf("Reconfigure failed : ", err)
+        }
+        return nil
+}
+
+func (vm *VM) RemoveDisk() (err error) {
+        if err := SetupSession(vm); err != nil {
+                return fmt.Errorf("Error setting up vSphere session: %s", err)
+        }
+
+        // Cancel the sdk context
+        defer vm.cancel()
+
+        // Get a reference to the datacenter with host and vm folders populated
+        dcMo, err := GetDatacenter(vm)
+        if err != nil {
+                return fmt.Errorf("Failed to retrieve datacenter: %s", err)
+        }
+
+        vmMo, err := findVM(vm, dcMo, vm.Name)
+        if err != nil {
+                return fmt.Errorf("VM not found", vm.Name, err)
+        }
+        var deviceMo *types.VirtualDisk
+        spec := new(types.VirtualMachineConfigSpec)
+        for _, d := range vmMo.Config.Hardware.Device {
+                switch device := d.(type) {
+                case *types.VirtualDisk:
+                        deviceMo = device
+                }
+        }
+        removeOp := &types.VirtualDeviceConfigSpec{
+                Operation: types.VirtualDeviceConfigSpecOperationRemove,
+                Device:    deviceMo.GetVirtualDevice(),
+        }
+        spec.DeviceChange = append(spec.DeviceChange, removeOp)
+
+	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+        if err = vmo.RemoveDevice(vm.ctx, false, deviceMo); err != nil {
+                fmt.Errorf("Delete disk task returned an error : ", err)
+        }
+        return nil
+}
 // GetIPs returns the IPs of this VM. Returns all the IPs known to the API for
 // the different network cards for this VM. Includes IPV4 and IPV6 addresses.
 func (vm *VM) GetIPs() ([]net.IP, error) {

@@ -7,7 +7,7 @@ import (
 	"net"
 	"strings"
 
-	"github.com/apcera/libretto/ssh"
+	"github.com/avnish30jn/libretto/ssh"
 )
 
 // VirtualMachine represents a VM which can be provisioned using this library.
@@ -22,6 +22,8 @@ type VirtualMachine interface {
 	Halt() error
 	Start() error
 	GetSSH(ssh.Options) (ssh.Client, error)
+	AddDisk() error
+	RemoveDisk() error
 }
 
 const (

@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/apcera/libretto/ssh"
-	lvm "github.com/apcera/libretto/virtualmachine"
+	"github.com/avnish30jn/libretto/ssh"
+	lvm "github.com/avnish30jn/libretto/virtualmachine"
 )
 
 // Random generates a random number in between min and max

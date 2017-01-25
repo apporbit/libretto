@@ -3,7 +3,9 @@
 package vsphere
 
 import (
+	"archive/tar"
 	"crypto/tls"
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -16,8 +18,6 @@ import (
 	"regexp"
 	"strings"
 
-	"golang.org/x/net/context"
-
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
@@ -26,8 +26,8 @@ import (
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
 
-	"github.com/apcera/libretto/util"
-	lvm "github.com/apcera/libretto/virtualmachine"
+	"github.com/avnish30jn/libretto/util"
+	lvm "github.com/avnish30jn/libretto/virtualmachine"
 )
 
 // Exists checks if the VM already exists.
@@ -106,6 +106,68 @@ var open = func(name string) (file *os.File, err error) {
 
 var readAll = func(r io.Reader) ([]byte, error) {
 	return ioutil.ReadAll(r)
+}
+
+var extractOva = func(basePath string, body io.Reader) (string, error) {
+        fmt.Printf("Extracting ova to path: %s", basePath)
+        tarBallReader := tar.NewReader(body)
+        var ovfFileName string
+
+        for {   
+                header, err := tarBallReader.Next()
+                if err != nil {
+                        if err == io.EOF {
+                                break
+                        }
+                        return "", err
+                }
+                filename := header.Name
+                if filepath.Ext(filename) == ".ovf" {
+                        ovfFileName = filename
+                }
+                fmt.Printf("\nWriting file %s", filename) /*
+                        if filepath.Ext(filename) == ".vmdk" {
+                                break;
+                        }*/
+                err = func() error {
+                        writer, err := os.Create(filepath.Join(basePath, filename))
+                        defer writer.Close()
+                        if err != nil {
+                                return err
+                        }
+                        _, err = io.Copy(writer, tarBallReader)
+                        if err != nil {
+                                return err
+                        }
+                        return nil
+		}()
+                if err != nil {
+                        return "", err
+                }
+        }
+        if ovfFileName == "" {
+                return "", errors.New("no ovf file found in the archive")
+        }
+        fmt.Println("\nOva extracted successfully")
+        return filepath.Join(basePath, ovfFileName), nil
+}
+
+var downloadOva = func(basePath, url string) (string, error) {
+        fmt.Printf("Downloading ova file from url: %s\n", url)
+        resp, err := http.Get(url)
+        if err != nil {
+                return "", err
+        }
+        defer resp.Body.Close()
+        if resp.StatusCode != http.StatusOK {
+                return "", errors.New(fmt.Sprintf("can't download ova file from url: %s, status: %d", url, resp.StatusCode))
+        }
+
+        ovfFilePath, err := extractOva(basePath, resp.Body)
+        if err != nil {
+                return "", err
+        }
+        return ovfFilePath, nil
 }
 
 var parseOvf = func(ovfLocation string) (string, error) {
@@ -214,8 +276,8 @@ var createNetworkMapping = func(vm *VM, networks map[string]string, networkMors 
 var resetUnitNumbers = func(spec *types.OvfCreateImportSpecResult) {
 	s := &spec.ImportSpec.(*types.VirtualMachineImportSpec).ConfigSpec
 	for _, d := range s.DeviceChange {
-		n := &d.GetVirtualDeviceConfigSpec().Device.GetVirtualDevice().UnitNumber
-		if *n == 0 {
+		n := d.GetVirtualDeviceConfigSpec().Device.GetVirtualDevice().UnitNumber
+		if n != nil && *n == 0 {
 			*n = -1
 		}
 	}
@@ -317,7 +379,7 @@ func searchTree(vm *VM, mor types.ManagedObjectReference, name string) (*mo.Virt
 	case "VirtualMachine":
 		// Base recursive case, compare for value
 		vmMo := mo.VirtualMachine{}
-		err := vm.collector.RetrieveOne(vm.ctx, mor, []string{"name", "guest.ipAddress", "guest.guestState", "guest.net", "runtime.question", "snapshot.currentSnapshot"}, &vmMo)
+		err := vm.collector.RetrieveOne(vm.ctx, mor, []string{"name", "config", "guest.ipAddress", "guest.guestState", "guest.net", "runtime.question", "snapshot.currentSnapshot"}, &vmMo)
 		if err != nil {
 			return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
 		}
@@ -329,107 +391,36 @@ func searchTree(vm *VM, mor types.ManagedObjectReference, name string) (*mo.Virt
 	return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
 }
 
-var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []string) error {
-	n := util.Random(1, len(usableDatastores))
-	vm.datastore = usableDatastores[n-1]
-	dsMo, err := findDatastore(vm, dcMo, vm.datastore)
-	if err != nil {
-		return err
-	}
-	dsMor := dsMo.Reference()
-	template := createTemplateName(vm.Template, vm.datastore)
-	vmMo, err := findVM(vm, dcMo, template)
-	if err != nil {
-		return fmt.Errorf("error retrieving template: %s", err)
-	}
-	vmObj := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
-
-	l, err := getVMLocation(vm, dcMo)
-	if err != nil {
-		return err
-	}
-
-	// TODO: If the network needs to be reconfigured as well then this needs
-	// to delete all the network cards and create VirtualDevice specs.
-	// For now only configure the datastore and the host.
-	relocateSpec := types.VirtualMachineRelocateSpec{
-		Pool:      &l.ResourcePool,
-		Host:      &l.Host,
-		Datastore: &dsMor,
-	}
-
-	cisp := types.VirtualMachineCloneSpec{
-		Location: relocateSpec,
-		Template: false,
-		PowerOn:  false,
-	}
-
-	// To create a linked clone, we need to set the DiskMoveType and reference
-	// the snapshot of the VM we are cloning.
-	if vm.UseLinkedClones {
-		relocateSpec = types.VirtualMachineRelocateSpec{
-			Pool:         &l.ResourcePool,
-			Host:         &l.Host,
-			Datastore:    &dsMor,
-			DiskMoveType: "createNewChildDiskBacking",
-		}
-		cisp = types.VirtualMachineCloneSpec{
-			Location: relocateSpec,
-			Template: false,
-			PowerOn:  false,
-			Snapshot: vmMo.Snapshot.CurrentSnapshot,
-		}
-	}
-
-	folderObj := object.NewFolder(vm.client.Client, dcMo.VmFolder)
-	t, err := vmObj.Clone(vm.ctx, folderObj, vm.Name, cisp)
-	if err != nil {
-		return fmt.Errorf("error cloning vm from template: %s", err)
-	}
-	tInfo, err := t.WaitForResult(vm.ctx, nil)
-	if err != nil {
-		return fmt.Errorf("error waiting for clone task to finish: %s", err)
-	}
-	if tInfo.Error != nil {
-		return fmt.Errorf("clone task finished with error: %s", tInfo.Error)
-	}
-	vmMo, err = findVM(vm, dcMo, vm.Name)
-	if err != nil {
-		return fmt.Errorf("failed to retrieve cloned VM: %s", err)
-	}
-	if len(vm.Disks) > 0 {
-		if err = reconfigureVM(vm, vmMo); err != nil {
-			return err
-		}
-	}
-	// power on
-	if err = start(vm); err != nil {
-		return err
-	}
-	if err = waitForIP(vm, vmMo); err != nil {
-		return err
-	}
-	return nil
-}
-
 var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
 	vmObj := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
-	devices, err := vmObj.Device(vm.ctx)
+
+	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return err
+		return fmt.Errorf("Failed to retrieve datacenter: %s", err)
 	}
 
-	var add []types.BaseVirtualDevice
+	dsMo, err := findDatastore(vm, dcMo, vm.Datastores[0])
+	if err != nil {
+		return fmt.Errorf("Datastore not found", vm.Datastores[0], err)
+	}
+
 	for _, disk := range vm.Disks {
+		devices, err := vmObj.Device(vm.ctx)
+		if err != nil {
+			return err
+		}
 		controller, err := devices.FindDiskController(disk.Controller)
 		if err != nil {
 			return err
 		}
-		d := devices.CreateDisk(controller, "")
+		d := devices.CreateDisk(controller, dsMo.Reference(), "")
 		d.CapacityInKB = disk.Size
-		add = append(add, d)
+		err = vmObj.AddDevice(vm.ctx, d)
+		if err != nil {
+			return err
+		}
 	}
-	return vmObj.AddDevice(vm.ctx, add...)
+	return nil
 }
 
 var waitForIP = func(vm *VM, vmMo *mo.VirtualMachine) error {
@@ -596,14 +587,24 @@ var getVMLocation = func(vm *VM, dcMo *mo.Datacenter) (l location, err error) {
 	return
 }
 
-var createTemplateName = func(t string, ds string) string {
-	return fmt.Sprintf("%s-%s", t, ds)
-}
-
 var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string) error {
-	template := createTemplateName(vm.Template, selectedDatastore)
 	vm.datastore = selectedDatastore
+	basePath, err := ioutil.TempDir("", "")
+	if err != nil {
+		return err
+	}
+	defer func() {
+                if err := os.RemoveAll(basePath); err != nil {
+                        fmt.Errorf("can't remove temp directory, error: %s", err.Error())
+                }
+        }()
 	// Read the ovf file
+	if vm.OvaPathUrl != "" {
+                vm.OvfPath, err = downloadOva(basePath, vm.OvaPathUrl)
+                if err != nil {
+                        return err
+                }
+        }
 	ovfContent, err := parseOvf(vm.OvfPath)
 	if err != nil {
 		return err
@@ -626,7 +627,7 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 	// Create an import spec
 	cisp := types.OvfCreateImportSpecParams{
 		HostSystem:       &l.Host,
-		EntityName:       template,
+		EntityName:       vm.Name,
 		DiskProvisioning: "thin",
 		PropertyMapping:  nil,
 		NetworkMapping:   networkMapping,
@@ -662,42 +663,23 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 		return fmt.Errorf("error uploading the ovf template: %s", err)
 	}
 
-	vmMo, err := findVM(vm, dcMo, template)
+	vmMo, err := findVM(vm, dcMo, vm.Name)
 	if err != nil {
 		return fmt.Errorf("error getting the uploaded VM: %s", err)
 	}
-
-	// LinkedClones cannot be created from templates, but must be created from snapshots of VMs.
-	// If UseLinkedClones is set to true, do not mark this is a template and instead
-	// create the necessary snapshot to produce a linked clone from.
-	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
-
-	if vm.UseLinkedClones {
-		s := snapshot{
-			Name:        "snapshot-" + template,
-			Description: "Snapshot created by Libretto for linked clones.",
-			Memory:      false,
-			Quiesce:     false,
-		}
-
-		snapshotTask, err := vmo.CreateSnapshot(vm.ctx, s.Name, s.Description, s.Memory, s.Quiesce)
-
-		if err != nil {
-			return fmt.Errorf("error creating snapshot of the vm: %s", err)
-		}
-		tInfo, err := snapshotTask.WaitForResult(vm.ctx, nil)
-		if err != nil {
-			return fmt.Errorf("error waiting for snapshot to finish: %s", err)
-		}
-		if tInfo.Error != nil {
-			return fmt.Errorf("snapshot task returned an error: %s", err)
-		}
-	} else {
-		err = vmo.MarkAsTemplate(vm.ctx)
-		if err != nil {
-			return fmt.Errorf("error converting the uploaded VM to a template: %s", err)
-		}
-	}
+	if len(vm.Disks) > 0 {
+                if err = reconfigureVM(vm, vmMo); err != nil {
+                        return err
+                }
+        }
+        // power on
+        if err = start(vm); err != nil {
+                return err
+        }
+        fmt.Println("VM is powered on, waiting for ip")
+        if err = waitForIP(vm, vmMo); err != nil {
+                return err
+        }
 	return nil
 }
 

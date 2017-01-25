@@ -14,7 +14,7 @@ import (
 
 	"golang.org/x/net/context"
 
-	"github.com/apcera/libretto/virtualmachine"
+	"github.com/avnish30jn/libretto/virtualmachine"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/property"
