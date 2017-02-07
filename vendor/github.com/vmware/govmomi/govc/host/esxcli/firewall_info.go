@@ -27,8 +27,11 @@ type FirewallInfo struct {
 // GetFirewallInfo via 'esxcli network firewall get'
 // The HostFirewallSystem type does not expose this data.
 // This helper can be useful in particular to determine if the firewall is enabled or disabled.
-func GetFirewallInfo(s *object.HostFirewallSystem) (*FirewallInfo, error) {
-	x, err := NewExecutor(s.Client(), s.Host)
+func GetFirewallInfo(s *object.HostSystem) (*FirewallInfo, error) {
+	x, err := NewExecutor(s.Client(), s)
+	if err != nil {
+		return nil, err
+	}
 
 	res, err := x.Run([]string{"network", "firewall", "get"})
 	if err != nil {

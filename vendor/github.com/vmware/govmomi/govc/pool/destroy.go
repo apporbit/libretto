@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,28 +17,37 @@ limitations under the License.
 package pool
 
 import (
+	"context"
 	"flag"
 
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
-	"golang.org/x/net/context"
 )
 
 type destroy struct {
 	*flags.DatacenterFlag
-	recursive bool
+
+	children bool
 }
 
 func init() {
 	cli.Register("pool.destroy", &destroy{})
 }
 
-func (cmd *destroy) Register(f *flag.FlagSet) {
-	f.BoolVar(&cmd.recursive, "r", false, "Remove all child resource pools recursively")
+func (cmd *destroy) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.DatacenterFlag, ctx = flags.NewDatacenterFlag(ctx)
+	cmd.DatacenterFlag.Register(ctx, f)
+
+	f.BoolVar(&cmd.children, "children", false, "Remove all children pools")
 }
 
-func (cmd *destroy) Process() error { return nil }
+func (cmd *destroy) Process(ctx context.Context) error {
+	if err := cmd.DatacenterFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *destroy) Usage() string {
 	return "POOL..."
@@ -48,7 +57,7 @@ func (cmd *destroy) Description() string {
 	return "Destroy one or more resource POOLs.\n" + poolNameHelp
 }
 
-func (cmd *destroy) Run(f *flag.FlagSet) error {
+func (cmd *destroy) Run(ctx context.Context, f *flag.FlagSet) error {
 	if f.NArg() == 0 {
 		return flag.ErrHelp
 	}
@@ -59,7 +68,7 @@ func (cmd *destroy) Run(f *flag.FlagSet) error {
 	}
 
 	for _, arg := range f.Args() {
-		pools, err := finder.ResourcePoolList(context.TODO(), arg)
+		pools, err := finder.ResourcePoolList(ctx, arg)
 		if err != nil {
 			if _, ok := err.(*find.NotFoundError); ok {
 				// Ignore if pool cannot be found
@@ -70,20 +79,20 @@ func (cmd *destroy) Run(f *flag.FlagSet) error {
 		}
 
 		for _, pool := range pools {
-			if cmd.recursive {
-				err = pool.DestroyChildren(context.TODO())
+			if cmd.children {
+				err = pool.DestroyChildren(ctx)
 				if err != nil {
 					return err
 				}
-			}
-
-			task, err := pool.Destroy(context.TODO())
-			if err != nil {
-				return err
-			}
-			err = task.Wait(context.TODO())
-			if err != nil {
-				return err
+			} else {
+				task, err := pool.Destroy(ctx)
+				if err != nil {
+					return err
+				}
+				err = task.Wait(ctx)
+				if err != nil {
+					return err
+				}
 			}
 		}
 	}

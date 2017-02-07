@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package flags
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -28,33 +29,60 @@ import (
 )
 
 type DebugFlag struct {
+	common
+
 	enable bool
 }
 
-func (flag *DebugFlag) Register(f *flag.FlagSet) {
-	env := "GOVC_DEBUG"
-	enable := false
-	switch env := strings.ToLower(os.Getenv(env)); env {
-	case "1", "true":
-		enable = true
+var debugFlagKey = flagKey("debug")
+
+func NewDebugFlag(ctx context.Context) (*DebugFlag, context.Context) {
+	if v := ctx.Value(debugFlagKey); v != nil {
+		return v.(*DebugFlag), ctx
 	}
 
-	usage := fmt.Sprintf("Store debug logs [%s]", env)
-	f.BoolVar(&flag.enable, "debug", enable, usage)
+	v := &DebugFlag{}
+	ctx = context.WithValue(ctx, debugFlagKey, v)
+	return v, ctx
 }
 
-func (flag *DebugFlag) Process() error {
-	if flag.enable {
+func (flag *DebugFlag) Register(ctx context.Context, f *flag.FlagSet) {
+	flag.RegisterOnce(func() {
+		env := "GOVC_DEBUG"
+		enable := false
+		switch env := strings.ToLower(os.Getenv(env)); env {
+		case "1", "true":
+			enable = true
+		}
+
+		usage := fmt.Sprintf("Store debug logs [%s]", env)
+		f.BoolVar(&flag.enable, "debug", enable, usage)
+	})
+}
+
+func (flag *DebugFlag) Process(ctx context.Context) error {
+	if !flag.enable {
+		return nil
+	}
+
+	return flag.ProcessOnce(func() error {
 		// Base path for storing debug logs.
 		r := os.Getenv("GOVC_DEBUG_PATH")
 		if r == "" {
-			r = filepath.Join(os.Getenv("HOME"), ".govmomi")
+			r = home
 		}
 		r = filepath.Join(r, "debug")
 
 		// Path for this particular run.
-		now := time.Now().Format("2006-01-02T15-04-05.999999999")
-		r = filepath.Join(r, now)
+		run := os.Getenv("GOVC_DEBUG_PATH_RUN")
+		if run == "" {
+			now := time.Now().Format("2006-01-02T15-04-05.999999999")
+			r = filepath.Join(r, now)
+		} else {
+			// reuse the same path
+			r = filepath.Join(r, run)
+			_ = os.RemoveAll(r)
+		}
 
 		err := os.MkdirAll(r, 0700)
 		if err != nil {
@@ -66,7 +94,6 @@ func (flag *DebugFlag) Process() error {
 		}
 
 		debug.SetProvider(&p)
-	}
-
-	return nil
+		return nil
+	})
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package autostart
 
 import (
+	"context"
 	"errors"
 	"flag"
 
@@ -25,7 +26,6 @@ import (
 	"github.com/vmware/govmomi/vim25/methods"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type AutostartFlag struct {
@@ -34,15 +34,39 @@ type AutostartFlag struct {
 	*flags.HostSystemFlag
 }
 
-func (f *AutostartFlag) Register(fs *flag.FlagSet) {}
+func newAutostartFlag(ctx context.Context) (*AutostartFlag, context.Context) {
+	f := &AutostartFlag{}
+	f.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	f.DatacenterFlag, ctx = flags.NewDatacenterFlag(ctx)
+	f.HostSystemFlag, ctx = flags.NewHostSystemFlag(ctx)
+	return f, ctx
+}
 
-func (f *AutostartFlag) Process() error { return nil }
+func (f *AutostartFlag) Register(ctx context.Context, fs *flag.FlagSet) {
+	f.ClientFlag.Register(ctx, fs)
+	f.DatacenterFlag.Register(ctx, fs)
+	f.HostSystemFlag.Register(ctx, fs)
+}
+
+func (f *AutostartFlag) Process(ctx context.Context) error {
+	if err := f.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := f.DatacenterFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := f.HostSystemFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 // VirtualMachines returns list of virtual machine objects based on the
 // arguments specified on the command line. This helper is defined in
 // flags.SearchFlag as well, but that pulls in other virtual machine flags that
 // are not relevant here.
 func (f *AutostartFlag) VirtualMachines(args []string) ([]*object.VirtualMachine, error) {
+	ctx := context.TODO()
 	if len(args) == 0 {
 		return nil, errors.New("no argument")
 	}
@@ -54,7 +78,7 @@ func (f *AutostartFlag) VirtualMachines(args []string) ([]*object.VirtualMachine
 
 	var out []*object.VirtualMachine
 	for _, arg := range args {
-		vms, err := finder.VirtualMachineList(context.TODO(), arg)
+		vms, err := finder.VirtualMachineList(ctx, arg)
 		if err != nil {
 			return nil, err
 		}
@@ -66,19 +90,20 @@ func (f *AutostartFlag) VirtualMachines(args []string) ([]*object.VirtualMachine
 }
 
 func (f *AutostartFlag) HostAutoStartManager() (*mo.HostAutoStartManager, error) {
+	ctx := context.TODO()
 	h, err := f.HostSystem()
 	if err != nil {
 		return nil, err
 	}
 
 	var mhs mo.HostSystem
-	err = h.Properties(context.TODO(), h.Reference(), []string{"configManager.autoStartManager"}, &mhs)
+	err = h.Properties(ctx, h.Reference(), []string{"configManager.autoStartManager"}, &mhs)
 	if err != nil {
 		return nil, err
 	}
 
 	var mhas mo.HostAutoStartManager
-	err = h.Properties(context.TODO(), *mhs.ConfigManager.AutoStartManager, nil, &mhas)
+	err = h.Properties(ctx, *mhs.ConfigManager.AutoStartManager, nil, &mhas)
 	if err != nil {
 		return nil, err
 	}
@@ -87,6 +112,7 @@ func (f *AutostartFlag) HostAutoStartManager() (*mo.HostAutoStartManager, error)
 }
 
 func (f *AutostartFlag) ReconfigureDefaults(template types.AutoStartDefaults) error {
+	ctx := context.TODO()
 	c, err := f.Client()
 	if err != nil {
 		return err
@@ -104,7 +130,7 @@ func (f *AutostartFlag) ReconfigureDefaults(template types.AutoStartDefaults) er
 		},
 	}
 
-	_, err = methods.ReconfigureAutostart(context.TODO(), c, &req)
+	_, err = methods.ReconfigureAutostart(ctx, c, &req)
 	if err != nil {
 		return err
 	}
@@ -113,6 +139,7 @@ func (f *AutostartFlag) ReconfigureDefaults(template types.AutoStartDefaults) er
 }
 
 func (f *AutostartFlag) ReconfigureVMs(args []string, template types.AutoStartPowerInfo) error {
+	ctx := context.TODO()
 	c, err := f.Client()
 	if err != nil {
 		return err
@@ -141,7 +168,7 @@ func (f *AutostartFlag) ReconfigureVMs(args []string, template types.AutoStartPo
 		req.Spec.PowerInfo = append(req.Spec.PowerInfo, pi)
 	}
 
-	_, err = methods.ReconfigureAutostart(context.TODO(), c, &req)
+	_, err = methods.ReconfigureAutostart(ctx, c, &req)
 	if err != nil {
 		return err
 	}

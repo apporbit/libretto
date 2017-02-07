@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,11 +17,12 @@ limitations under the License.
 package guest
 
 import (
+	"context"
+
 	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type OperationsManager struct {

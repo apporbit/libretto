@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -24,15 +24,17 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"context"
+
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/property"
+
 	"github.com/vmware/govmomi/units"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type info struct {
@@ -40,28 +42,48 @@ type info struct {
 	*flags.OutputFlag
 	*flags.SearchFlag
 
-	WaitForIP   bool
-	General     bool
-	ExtraConfig bool
-	Resources   bool
+	WaitForIP       bool
+	General         bool
+	ExtraConfig     bool
+	Resources       bool
+	ToolsConfigInfo bool
 }
 
 func init() {
 	cli.Register("vm.info", &info{})
 }
 
-func (cmd *info) Register(f *flag.FlagSet) {
-	cmd.SearchFlag = flags.NewSearchFlag(flags.SearchVirtualMachines)
+func (cmd *info) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	cmd.ClientFlag.Register(ctx, f)
+
+	cmd.OutputFlag, ctx = flags.NewOutputFlag(ctx)
+	cmd.OutputFlag.Register(ctx, f)
+
+	cmd.SearchFlag, ctx = flags.NewSearchFlag(ctx, flags.SearchVirtualMachines)
+	cmd.SearchFlag.Register(ctx, f)
 
 	f.BoolVar(&cmd.WaitForIP, "waitip", false, "Wait for VM to acquire IP address")
 	f.BoolVar(&cmd.General, "g", true, "Show general summary")
 	f.BoolVar(&cmd.ExtraConfig, "e", false, "Show ExtraConfig")
 	f.BoolVar(&cmd.Resources, "r", false, "Show resource summary")
+	f.BoolVar(&cmd.ToolsConfigInfo, "t", false, "Show ToolsConfigInfo")
 }
 
-func (cmd *info) Process() error { return nil }
+func (cmd *info) Process(ctx context.Context) error {
+	if err := cmd.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.OutputFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.SearchFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
-func (cmd *info) Run(f *flag.FlagSet) error {
+func (cmd *info) Run(ctx context.Context, f *flag.FlagSet) error {
 	c, err := cmd.Client()
 	if err != nil {
 		return err
@@ -97,9 +119,11 @@ func (cmd *info) Run(f *flag.FlagSet) error {
 		if cmd.Resources {
 			props = append(props, "datastore", "network")
 		}
+		if cmd.ToolsConfigInfo {
+			props = append(props, "config.tools")
+		}
 	}
 
-	ctx := context.TODO()
 	pc := property.DefaultCollector(c)
 	if len(refs) != 0 {
 		err = pc.Retrieve(ctx, refs, props, &res.VirtualMachines)
@@ -149,37 +173,47 @@ func (r *infoResult) collectReferences(pc *property.Collector, ctx context.Conte
 
 	var host []mo.HostSystem
 	var network []mo.Network
+	var opaque []mo.OpaqueNetwork
 	var dvp []mo.DistributedVirtualPortgroup
 	var datastore []mo.Datastore
 	// Table to drive inflating refs to their mo.* counterparts (dest)
 	// and save() the Name to r.entities w/o using reflection here.
+	// Note that we cannot use a []mo.ManagedEntity here, since mo.Network has its own 'Name' field,
+	// the mo.Network.ManagedEntity.Name field will not be set.
 	vrefs := map[string]*struct {
 		dest interface{}
 		refs []types.ManagedObjectReference
 		save func()
 	}{
-		"host": {
+		"HostSystem": {
 			&host, nil, func() {
 				for _, e := range host {
 					r.entities[e.Reference()] = e.Name
 				}
 			},
 		},
-		"network": {
+		"Network": {
 			&network, nil, func() {
 				for _, e := range network {
 					r.entities[e.Reference()] = e.Name
 				}
 			},
 		},
-		"dvp": {
+		"OpaqueNetwork": {
+			&opaque, nil, func() {
+				for _, e := range opaque {
+					r.entities[e.Reference()] = e.Name
+				}
+			},
+		},
+		"DistributedVirtualPortgroup": {
 			&dvp, nil, func() {
 				for _, e := range dvp {
 					r.entities[e.Reference()] = e.Name
 				}
 			},
 		},
-		"datastore": {
+		"Datastore": {
 			&datastore, nil, func() {
 				for _, e := range datastore {
 					r.entities[e.Reference()] = e.Name
@@ -190,13 +224,13 @@ func (r *infoResult) collectReferences(pc *property.Collector, ctx context.Conte
 
 	xrefs := make(map[types.ManagedObjectReference]bool)
 	// Add MOR to vrefs[kind].refs avoiding any duplicates.
-	addRef := func(kind string, refs ...types.ManagedObjectReference) {
+	addRef := func(refs ...types.ManagedObjectReference) {
 		for _, ref := range refs {
 			if _, exists := xrefs[ref]; exists {
 				return
 			}
 			xrefs[ref] = true
-			vref := vrefs[kind]
+			vref := vrefs[ref.Type]
 			vref.refs = append(vref.refs, ref)
 		}
 	}
@@ -204,21 +238,13 @@ func (r *infoResult) collectReferences(pc *property.Collector, ctx context.Conte
 	for _, vm := range r.VirtualMachines {
 		if r.cmd.General {
 			if ref := vm.Summary.Runtime.Host; ref != nil {
-				addRef("host", *ref)
+				addRef(*ref)
 			}
 		}
 
 		if r.cmd.Resources {
-			addRef("datastore", vm.Datastore...)
-
-			for _, net := range vm.Network {
-				switch net.Type {
-				case "Network":
-					addRef("network", net)
-				case "DistributedVirtualPortgroup":
-					addRef("dvp", net)
-				}
-			}
+			addRef(vm.Datastore...)
+			addRef(vm.Network...)
 		}
 	}
 
@@ -280,6 +306,9 @@ func (r *infoResult) Write(w io.Writer) error {
 		}
 
 		if r.cmd.Resources {
+			if s.Storage == nil {
+				s.Storage = new(types.VirtualMachineStorageSummary)
+			}
 			fmt.Fprintf(tw, "  CPU usage:\t%dMHz\n", s.QuickStats.OverallCpuUsage)
 			fmt.Fprintf(tw, "  Host memory usage:\t%dMB\n", s.QuickStats.HostMemoryUsage)
 			fmt.Fprintf(tw, "  Guest memory usage:\t%dMB\n", s.QuickStats.GuestMemoryUsage)
@@ -295,6 +324,20 @@ func (r *infoResult) Write(w io.Writer) error {
 			for _, v := range vm.Config.ExtraConfig {
 				fmt.Fprintf(tw, "    %s:\t%s\n", v.GetOptionValue().Key, v.GetOptionValue().Value)
 			}
+		}
+
+		if r.cmd.ToolsConfigInfo {
+			t := vm.Config.Tools
+			fmt.Fprintf(tw, "  ToolsConfigInfo:\n")
+			fmt.Fprintf(tw, "    ToolsVersion:\t%d\n", t.ToolsVersion)
+			fmt.Fprintf(tw, "    AfterPowerOn:\t%s\n", flags.NewOptionalBool(&t.AfterPowerOn).String())
+			fmt.Fprintf(tw, "    AfterResume:\t%s\n", flags.NewOptionalBool(&t.AfterResume).String())
+			fmt.Fprintf(tw, "    BeforeGuestStandby:\t%s\n", flags.NewOptionalBool(&t.BeforeGuestStandby).String())
+			fmt.Fprintf(tw, "    BeforeGuestShutdown:\t%s\n", flags.NewOptionalBool(&t.BeforeGuestShutdown).String())
+			fmt.Fprintf(tw, "    BeforeGuestReboot:\t%s\n", flags.NewOptionalBool(&t.BeforeGuestReboot).String())
+			fmt.Fprintf(tw, "    ToolsUpgradePolicy:\t%s\n", t.ToolsUpgradePolicy)
+			fmt.Fprintf(tw, "    PendingCustomization:\t%s\n", t.PendingCustomization)
+			fmt.Fprintf(tw, "    SyncTimeWithHost:\t%s\n", flags.NewOptionalBool(&t.SyncTimeWithHost).String())
 		}
 	}
 

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,30 +17,43 @@ limitations under the License.
 package pool
 
 import (
+	"context"
 	"flag"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type change struct {
 	*flags.DatacenterFlag
 	*ResourceConfigSpecFlag
+
 	name string
 }
 
 func init() {
-	spec := NewResourceConfigSpecFlag()
-	cli.Register("pool.change", &change{ResourceConfigSpecFlag: spec})
+	cli.Register("pool.change", &change{})
 }
 
-func (cmd *change) Register(f *flag.FlagSet) {
+func (cmd *change) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.DatacenterFlag, ctx = flags.NewDatacenterFlag(ctx)
+	cmd.DatacenterFlag.Register(ctx, f)
+	cmd.ResourceConfigSpecFlag = NewResourceConfigSpecFlag()
+	cmd.ResourceConfigSpecFlag.Register(ctx, f)
+
 	f.StringVar(&cmd.name, "name", "", "Resource pool name")
 }
 
-func (cmd *change) Process() error { return nil }
+func (cmd *change) Process(ctx context.Context) error {
+	if err := cmd.DatacenterFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.ResourceConfigSpecFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *change) Usage() string {
 	return "POOL..."
@@ -50,7 +63,7 @@ func (cmd *change) Description() string {
 	return "Change the configuration of one or more resource POOLs.\n" + poolNameHelp
 }
 
-func (cmd *change) Run(f *flag.FlagSet) error {
+func (cmd *change) Run(ctx context.Context, f *flag.FlagSet) error {
 	if f.NArg() == 0 {
 		return flag.ErrHelp
 	}
@@ -68,13 +81,13 @@ func (cmd *change) Run(f *flag.FlagSet) error {
 	})
 
 	for _, arg := range f.Args() {
-		pools, err := finder.ResourcePoolList(context.TODO(), arg)
+		pools, err := finder.ResourcePoolListAll(ctx, arg)
 		if err != nil {
 			return err
 		}
 
 		for _, pool := range pools {
-			err := pool.UpdateConfig(context.TODO(), cmd.name, &cmd.ResourceConfigSpec)
+			err := pool.UpdateConfig(ctx, cmd.name, &cmd.ResourceConfigSpec)
 			if err != nil {
 				return err
 			}

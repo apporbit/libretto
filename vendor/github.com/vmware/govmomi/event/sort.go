@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 )
 
-// Sort events in accending order base on Key
+// Sort events in ascending order base on Key
 // From the EventHistoryCollector.latestPage sdk docs:
 //   The "oldest event" is the one with the smallest key (event ID).
 //   The events in the returned page are unordered.

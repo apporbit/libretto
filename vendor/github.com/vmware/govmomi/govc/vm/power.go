@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package vm
 
 import (
+	"context"
 	"flag"
 	"fmt"
 
@@ -25,7 +26,6 @@ import (
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type power struct {
@@ -45,8 +45,12 @@ func init() {
 	cli.Register("vm.power", &power{})
 }
 
-func (cmd *power) Register(f *flag.FlagSet) {
-	cmd.SearchFlag = flags.NewSearchFlag(flags.SearchVirtualMachines)
+func (cmd *power) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	cmd.ClientFlag.Register(ctx, f)
+
+	cmd.SearchFlag, ctx = flags.NewSearchFlag(ctx, flags.SearchVirtualMachines)
+	cmd.SearchFlag.Register(ctx, f)
 
 	f.BoolVar(&cmd.On, "on", false, "Power on")
 	f.BoolVar(&cmd.Off, "off", false, "Power off")
@@ -57,7 +61,13 @@ func (cmd *power) Register(f *flag.FlagSet) {
 	f.BoolVar(&cmd.Force, "force", false, "Force (ignore state error and hard shutdown/reboot if tools unavailable)")
 }
 
-func (cmd *power) Process() error {
+func (cmd *power) Process(ctx context.Context) error {
+	if err := cmd.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.SearchFlag.Process(ctx); err != nil {
+		return err
+	}
 	opts := []bool{cmd.On, cmd.Off, cmd.Reset, cmd.Suspend, cmd.Reboot, cmd.Shutdown}
 	selected := false
 
@@ -88,7 +98,7 @@ func isToolsUnavailable(err error) bool {
 	return false
 }
 
-func (cmd *power) Run(f *flag.FlagSet) error {
+func (cmd *power) Run(ctx context.Context, f *flag.FlagSet) error {
 	vms, err := cmd.VirtualMachines(f.Args())
 	if err != nil {
 		return err
@@ -100,29 +110,29 @@ func (cmd *power) Run(f *flag.FlagSet) error {
 		switch {
 		case cmd.On:
 			fmt.Fprintf(cmd, "Powering on %s... ", vm.Reference())
-			task, err = vm.PowerOn(context.TODO())
+			task, err = vm.PowerOn(ctx)
 		case cmd.Off:
 			fmt.Fprintf(cmd, "Powering off %s... ", vm.Reference())
-			task, err = vm.PowerOff(context.TODO())
+			task, err = vm.PowerOff(ctx)
 		case cmd.Reset:
 			fmt.Fprintf(cmd, "Reset %s... ", vm.Reference())
-			task, err = vm.Reset(context.TODO())
+			task, err = vm.Reset(ctx)
 		case cmd.Suspend:
 			fmt.Fprintf(cmd, "Suspend %s... ", vm.Reference())
-			task, err = vm.Suspend(context.TODO())
+			task, err = vm.Suspend(ctx)
 		case cmd.Reboot:
 			fmt.Fprintf(cmd, "Reboot guest %s... ", vm.Reference())
-			err = vm.RebootGuest(context.TODO())
+			err = vm.RebootGuest(ctx)
 
 			if err != nil && cmd.Force && isToolsUnavailable(err) {
-				task, err = vm.Reset(context.TODO())
+				task, err = vm.Reset(ctx)
 			}
 		case cmd.Shutdown:
 			fmt.Fprintf(cmd, "Shutdown guest %s... ", vm.Reference())
-			err = vm.ShutdownGuest(context.TODO())
+			err = vm.ShutdownGuest(ctx)
 
 			if err != nil && cmd.Force && isToolsUnavailable(err) {
-				task, err = vm.PowerOff(context.TODO())
+				task, err = vm.PowerOff(ctx)
 			}
 		}
 
@@ -131,7 +141,7 @@ func (cmd *power) Run(f *flag.FlagSet) error {
 		}
 
 		if task != nil {
-			err = task.Wait(context.TODO())
+			err = task.Wait(ctx)
 		}
 		if err == nil {
 			fmt.Fprintf(cmd, "OK\n")

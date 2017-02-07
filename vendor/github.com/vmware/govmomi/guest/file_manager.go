@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ limitations under the License.
 package guest
 
 import (
+	"context"
+
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/methods"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type FileManager struct {
@@ -142,7 +143,7 @@ func (m FileManager) InitiateFileTransferToGuest(ctx context.Context, auth types
 	return res.Returnval, nil
 }
 
-func (m FileManager) ListFiles(ctx context.Context, auth types.BaseGuestAuthentication, filePath string, index int, maxResults int, matchPattern string) (*types.GuestListFileInfo, error) {
+func (m FileManager) ListFiles(ctx context.Context, auth types.BaseGuestAuthentication, filePath string, index int32, maxResults int32, matchPattern string) (*types.GuestListFileInfo, error) {
 	req := types.ListFilesInGuest{
 		This:         m.Reference(),
 		Vm:           m.vm,

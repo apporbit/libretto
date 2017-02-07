@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package flags
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -26,6 +27,8 @@ import (
 	"time"
 
 	"github.com/vmware/govmomi/vim25/progress"
+
+	"github.com/davecgh/go-spew/spew"
 )
 
 type OutputWriter interface {
@@ -33,21 +36,42 @@ type OutputWriter interface {
 }
 
 type OutputFlag struct {
+	common
+
 	JSON bool
 	TTY  bool
+	Dump bool
+	Out  io.Writer
 }
 
-func (flag *OutputFlag) Register(f *flag.FlagSet) {
-	f.BoolVar(&flag.JSON, "json", false, "Enable JSON output")
-}
+var outputFlagKey = flagKey("output")
 
-func (flag *OutputFlag) Process() error {
-	if !flag.JSON {
-		// Assume we have a tty if not outputting JSON
-		flag.TTY = true
+func NewOutputFlag(ctx context.Context) (*OutputFlag, context.Context) {
+	if v := ctx.Value(outputFlagKey); v != nil {
+		return v.(*OutputFlag), ctx
 	}
 
-	return nil
+	v := &OutputFlag{Out: os.Stdout}
+	ctx = context.WithValue(ctx, outputFlagKey, v)
+	return v, ctx
+}
+
+func (flag *OutputFlag) Register(ctx context.Context, f *flag.FlagSet) {
+	flag.RegisterOnce(func() {
+		f.BoolVar(&flag.JSON, "json", false, "Enable JSON output")
+		f.BoolVar(&flag.Dump, "dump", false, "Enable output dump")
+	})
+}
+
+func (flag *OutputFlag) Process(ctx context.Context) error {
+	return flag.ProcessOnce(func() error {
+		if !flag.JSON {
+			// Assume we have a tty if not outputting JSON
+			flag.TTY = true
+		}
+
+		return nil
+	})
 }
 
 // Log outputs the specified string, prefixed with the current time.
@@ -78,13 +102,14 @@ func (flag *OutputFlag) WriteString(s string) (int, error) {
 
 func (flag *OutputFlag) WriteResult(result OutputWriter) error {
 	var err error
-	var out = os.Stdout
 
 	if flag.JSON {
-		enc := json.NewEncoder(out)
-		err = enc.Encode(result)
+		err = json.NewEncoder(flag.Out).Encode(result)
+	} else if flag.Dump {
+		scs := spew.ConfigState{Indent: "    "}
+		scs.Fdump(flag.Out, result)
 	} else {
-		err = result.Write(out)
+		err = result.Write(flag.Out)
 	}
 
 	return err

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,31 +17,41 @@ limitations under the License.
 package device
 
 import (
+	"context"
 	"flag"
 	"fmt"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
-	"golang.org/x/net/context"
 )
 
 type remove struct {
 	*flags.VirtualMachineFlag
+	keepFiles bool
 }
 
 func init() {
 	cli.Register("device.remove", &remove{})
 }
 
-func (cmd *remove) Register(f *flag.FlagSet) {}
+func (cmd *remove) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.VirtualMachineFlag, ctx = flags.NewVirtualMachineFlag(ctx)
+	cmd.VirtualMachineFlag.Register(ctx, f)
+	f.BoolVar(&cmd.keepFiles, "keep", false, "Keep files in datastore")
+}
 
-func (cmd *remove) Process() error { return nil }
+func (cmd *remove) Process(ctx context.Context) error {
+	if err := cmd.VirtualMachineFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *remove) Usage() string {
 	return "DEVICE..."
 }
 
-func (cmd *remove) Run(f *flag.FlagSet) error {
+func (cmd *remove) Run(ctx context.Context, f *flag.FlagSet) error {
 	vm, err := cmd.VirtualMachine()
 	if err != nil {
 		return err
@@ -51,7 +61,7 @@ func (cmd *remove) Run(f *flag.FlagSet) error {
 		return flag.ErrHelp
 	}
 
-	devices, err := vm.Device(context.TODO())
+	devices, err := vm.Device(ctx)
 	if err != nil {
 		return err
 	}
@@ -62,7 +72,7 @@ func (cmd *remove) Run(f *flag.FlagSet) error {
 			return fmt.Errorf("device '%s' not found", name)
 		}
 
-		if err = vm.RemoveDevice(context.TODO(), device); err != nil {
+		if err = vm.RemoveDevice(ctx, cmd.keepFiles, device); err != nil {
 			return err
 		}
 	}

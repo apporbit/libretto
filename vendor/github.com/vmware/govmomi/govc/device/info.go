@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,10 +17,12 @@ limitations under the License.
 package device
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"text/tabwriter"
 
@@ -28,27 +30,68 @@ import (
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type info struct {
 	*flags.VirtualMachineFlag
 	*flags.OutputFlag
+	*flags.NetworkFlag
 }
 
 func init() {
 	cli.Register("device.info", &info{})
 }
 
-func (cmd *info) Register(f *flag.FlagSet) {}
+func (cmd *info) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.VirtualMachineFlag, ctx = flags.NewVirtualMachineFlag(ctx)
+	cmd.VirtualMachineFlag.Register(ctx, f)
 
-func (cmd *info) Process() error { return nil }
+	cmd.OutputFlag, ctx = flags.NewOutputFlag(ctx)
+	cmd.OutputFlag.Register(ctx, f)
+
+	cmd.NetworkFlag, ctx = flags.NewNetworkFlag(ctx)
+	cmd.NetworkFlag.Register(ctx, f)
+}
+
+func (cmd *info) Process(ctx context.Context) error {
+	if err := cmd.VirtualMachineFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.OutputFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.NetworkFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *info) Usage() string {
 	return "[DEVICE]..."
 }
 
-func (cmd *info) Run(f *flag.FlagSet) error {
+func (cmd *info) match(p string, devices object.VirtualDeviceList) object.VirtualDeviceList {
+	var matches object.VirtualDeviceList
+	match := func(name string) bool {
+		matched, _ := filepath.Match(p, name)
+		return matched
+	}
+
+	for _, device := range devices {
+		name := devices.Name(device)
+		eq := name == p
+		if eq || match(name) {
+			matches = append(matches, device)
+		}
+		if eq {
+			break
+		}
+	}
+
+	return matches
+}
+
+func (cmd *info) Run(ctx context.Context, f *flag.FlagSet) error {
 	vm, err := cmd.VirtualMachine()
 	if err != nil {
 		return err
@@ -58,7 +101,7 @@ func (cmd *info) Run(f *flag.FlagSet) error {
 		return flag.ErrHelp
 	}
 
-	devices, err := vm.Device(context.TODO())
+	devices, err := vm.Device(ctx)
 	if err != nil {
 		return err
 	}
@@ -67,16 +110,30 @@ func (cmd *info) Run(f *flag.FlagSet) error {
 		list: devices,
 	}
 
+	if cmd.NetworkFlag.IsSet() {
+		net, err := cmd.Network()
+		if err != nil {
+			return err
+		}
+
+		backing, err := net.EthernetCardBackingInfo(ctx)
+		if err != nil {
+			return err
+		}
+
+		devices = devices.SelectByBackingInfo(backing)
+	}
+
 	if f.NArg() == 0 {
 		res.Devices = devices
 	} else {
 		for _, name := range f.Args() {
-			device := devices.Find(name)
-			if device == nil {
+			matches := cmd.match(name, devices)
+			if len(matches) == 0 {
 				return fmt.Errorf("device '%s' not found", name)
 			}
 
-			res.Devices = append(res.Devices, device)
+			res.Devices = append(res.Devices, matches...)
 		}
 	}
 
@@ -111,7 +168,11 @@ func (r *infoResult) Write(w io.Writer) error {
 		} else {
 			if c := r.list.FindByKey(d.ControllerKey); c != nil {
 				fmt.Fprintf(tw, "  Controller:\t%s\n", r.Devices.Name(c))
-				fmt.Fprintf(tw, "  Unit number:\t%d\n", d.UnitNumber)
+				if d.UnitNumber != nil {
+					fmt.Fprintf(tw, "  Unit number:\t%d\n", *d.UnitNumber)
+				} else {
+					fmt.Fprintf(tw, "  Unit number:\t<nil>\n")
+				}
 			}
 		}
 

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,12 @@ limitations under the License.
 package host
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"text/tabwriter"
-
-	"golang.org/x/net/context"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
@@ -43,17 +42,35 @@ func init() {
 	cli.Register("host.info", &info{})
 }
 
-func (cmd *info) Register(f *flag.FlagSet) {}
+func (cmd *info) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	cmd.ClientFlag.Register(ctx, f)
 
-func (cmd *info) Process() error { return nil }
+	cmd.OutputFlag, ctx = flags.NewOutputFlag(ctx)
+	cmd.OutputFlag.Register(ctx, f)
 
-func (cmd *info) Run(f *flag.FlagSet) error {
+	cmd.HostSystemFlag, ctx = flags.NewHostSystemFlag(ctx)
+	cmd.HostSystemFlag.Register(ctx, f)
+}
+
+func (cmd *info) Process(ctx context.Context) error {
+	if err := cmd.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.OutputFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.HostSystemFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd *info) Run(ctx context.Context, f *flag.FlagSet) error {
 	c, err := cmd.Client()
 	if err != nil {
 		return err
 	}
-
-	ctx := context.TODO()
 
 	var res infoResult
 	var props []string
@@ -122,7 +139,7 @@ func (r *infoResult) Write(w io.Writer) error {
 		s := host.Summary
 		h := s.Hardware
 		z := s.QuickStats
-		ncpu := int(h.NumCpuPkgs * h.NumCpuCores)
+		ncpu := int32(h.NumCpuPkgs * h.NumCpuCores)
 		cpuUsage := 100 * float64(z.OverallCpuUsage) / float64(ncpu*h.CpuMhz)
 		memUsage := 100 * float64(z.OverallMemoryUsage<<20) / float64(h.MemorySize)
 

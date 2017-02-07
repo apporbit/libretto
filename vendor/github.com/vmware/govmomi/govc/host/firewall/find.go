@@ -17,11 +17,10 @@ limitations under the License.
 package firewall
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
-
-	"golang.org/x/net/context"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
@@ -45,27 +44,47 @@ func init() {
 	cli.Register("firewall.ruleset.find", &find{})
 }
 
-func (cmd *find) Register(f *flag.FlagSet) {
+func (cmd *find) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	cmd.ClientFlag.Register(ctx, f)
+	cmd.OutputFlag, ctx = flags.NewOutputFlag(ctx)
+	cmd.OutputFlag.Register(ctx, f)
+	cmd.HostSystemFlag, ctx = flags.NewHostSystemFlag(ctx)
+	cmd.HostSystemFlag.Register(ctx, f)
+
 	f.BoolVar(&cmd.check, "c", true, "Check if esx firewall is enabled")
 	f.BoolVar(&cmd.enabled, "enabled", true, "Find enabled rule sets if true, disabled if false")
 	f.StringVar((*string)(&cmd.Direction), "direction", string(types.HostFirewallRuleDirectionOutbound), "Direction")
 	f.StringVar((*string)(&cmd.PortType), "type", string(types.HostFirewallRulePortTypeDst), "Port type")
 	f.StringVar((*string)(&cmd.Protocol), "proto", string(types.HostFirewallRuleProtocolTcp), "Protocol")
-	f.IntVar(&cmd.Port, "port", 0, "Port")
+	f.Var(flags.NewInt32(&cmd.Port), "port", "Port")
 }
 
-func (cmd *find) Process() error { return nil }
+func (cmd *find) Process(ctx context.Context) error {
+	if err := cmd.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.OutputFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.HostSystemFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *find) Description() string {
 	return `Find firewall rulesets matching the given rule.
 
 For a complete list of rulesets: govc host.esxcli network firewall ruleset list
-For a complete list of rules:    govc host.esxcli network firewall ruleset rule list`
+For a complete list of rules:    govc host.esxcli network firewall ruleset rule list
+
+Examples:
+  govc firewall.ruleset.find -direction inbound -port 22
+  govc firewall.ruleset.find -direction outbound -port 2377`
 }
 
-func (cmd *find) Run(f *flag.FlagSet) error {
-	ctx := context.TODO()
-
+func (cmd *find) Run(ctx context.Context, f *flag.FlagSet) error {
 	host, err := cmd.HostSystem()
 	if err != nil {
 		return err
@@ -77,7 +96,7 @@ func (cmd *find) Run(f *flag.FlagSet) error {
 	}
 
 	if cmd.check {
-		esxfw, err := esxcli.GetFirewallInfo(fs)
+		esxfw, err := esxcli.GetFirewallInfo(host)
 		if err != nil {
 			return err
 		}

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package events
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -26,94 +27,59 @@ import (
 	"github.com/vmware/govmomi/event"
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
-	"github.com/vmware/govmomi/list"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type events struct {
 	*flags.DatacenterFlag
 
-	Max int
+	Max   int32
+	Tail  bool
+	Force bool
 }
 
 func init() {
+	// initialize with the maximum allowed objects set
 	cli.Register("events", &events{})
 }
 
-func (cmd *events) Register(f *flag.FlagSet) {
-	f.IntVar(&cmd.Max, "n", 25, "Output the last N events")
+func (cmd *events) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.DatacenterFlag, ctx = flags.NewDatacenterFlag(ctx)
+	cmd.DatacenterFlag.Register(ctx, f)
+
+	cmd.Max = 25 // default
+	f.Var(flags.NewInt32(&cmd.Max), "n", "Output the last N events")
+	f.BoolVar(&cmd.Tail, "f", false, "Follow event stream")
+	f.BoolVar(&cmd.Force, "force", false, "Disable number objects to monitor limit")
 }
 
-func (cmd *events) Process() error { return nil }
+func (cmd *events) Description() string {
+	return `Display events.
+
+Examples:
+  govc events vm/my-vm1 vm/my-vm2
+  govc events /dc1/vm/* /dc2/vm/*
+  govc ls -t HostSystem host/* | xargs govc events | grep -i vsan`
+}
 
 func (cmd *events) Usage() string {
 	return "[PATH]..."
 }
 
-func (cmd *events) Run(f *flag.FlagSet) error {
-	ctx := context.TODO()
-
-	finder, err := cmd.Finder()
-	if err != nil {
+func (cmd *events) Process(ctx context.Context) error {
+	if err := cmd.DatacenterFlag.Process(ctx); err != nil {
 		return err
 	}
+	return nil
+}
 
-	c, err := cmd.Client()
-	if err != nil {
-		return err
+func (cmd *events) printEvents(ctx context.Context, obj *types.ManagedObjectReference, page []types.BaseEvent, m *event.Manager) error {
+	event.Sort(page)
+	if obj != nil {
+		// print the object reference
+		fmt.Fprintf(os.Stdout, "\n==> %s <==\n", obj.String())
 	}
-
-	m := event.NewManager(c)
-
-	var objs []list.Element
-
-	args := f.Args()
-	if len(args) == 0 {
-		args = []string{"."}
-	}
-
-	for _, arg := range args {
-		es, err := finder.ManagedObjectList(ctx, arg)
-		if err != nil {
-			return err
-		}
-
-		objs = append(objs, es...)
-	}
-
-	var events []types.BaseEvent
-
-	for _, o := range objs {
-		filter := types.EventFilterSpec{
-			Entity: &types.EventFilterSpecByEntity{
-				Entity:    o.Object.Reference(),
-				Recursion: types.EventFilterSpecRecursionOptionAll,
-			},
-		}
-
-		collector, err := m.CreateCollectorForEvents(ctx, filter)
-		if err != nil {
-			return fmt.Errorf("[%s] %s", o.Path, err)
-		}
-		defer collector.Destroy(ctx)
-
-		err = collector.SetPageSize(ctx, cmd.Max)
-		if err != nil {
-			return err
-		}
-
-		page, err := collector.LatestPage(ctx)
-		if err != nil {
-			return err
-		}
-
-		events = append(events, page...)
-	}
-
-	event.Sort(events)
-
-	for _, e := range events {
+	for _, e := range page {
 		cat, err := m.EventCategory(ctx, e)
 		if err != nil {
 			return err
@@ -122,13 +88,54 @@ func (cmd *events) Run(f *flag.FlagSet) error {
 		event := e.GetEvent()
 		msg := strings.TrimSpace(event.FullFormattedMessage)
 
+		// if this is a TaskEvent gather a little more information
 		if t, ok := e.(*types.TaskEvent); ok {
-			msg = fmt.Sprintf("%s (target=%s %s)", msg, t.Info.Entity.Type, t.Info.EntityName)
+			// some tasks won't have this information, so just use the event message
+			if t.Info.Entity != nil {
+				msg = fmt.Sprintf("%s (target=%s %s)", msg, t.Info.Entity.Type, t.Info.EntityName)
+			}
 		}
 
 		fmt.Fprintf(os.Stdout, "[%s] [%s] %s\n",
 			event.CreatedTime.Local().Format(time.ANSIC),
-			cat, msg)
+			cat,
+			msg)
+	}
+	return nil
+}
+
+func (cmd *events) Run(ctx context.Context, f *flag.FlagSet) error {
+	c, err := cmd.Client()
+	if err != nil {
+		return err
+	}
+
+	objs, err := cmd.ManagedObjects(ctx, f.Args())
+	if err != nil {
+		return err
+	}
+
+	if len(objs) > 0 {
+		// need an event manager
+		m := event.NewManager(c)
+
+		// get the event stream
+		err = m.Events(ctx, objs, cmd.Max, cmd.Tail, cmd.Force, func(obj types.ManagedObjectReference, ee []types.BaseEvent) error {
+			var o *types.ManagedObjectReference
+			if len(objs) > 1 {
+				o = &obj
+			}
+			err = cmd.printEvents(ctx, o, ee, m)
+			if err != nil {
+				return err
+			}
+			return nil
+		})
+
+		if err != nil {
+			return err
+		}
+
 	}
 
 	return nil

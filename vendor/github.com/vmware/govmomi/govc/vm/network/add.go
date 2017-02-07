@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,12 +17,12 @@ limitations under the License.
 package network
 
 import (
+	"context"
 	"errors"
 	"flag"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
-	"golang.org/x/net/context"
 )
 
 type add struct {
@@ -34,11 +34,32 @@ func init() {
 	cli.Register("vm.network.add", &add{})
 }
 
-func (cmd *add) Register(f *flag.FlagSet) {}
+func (cmd *add) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.VirtualMachineFlag, ctx = flags.NewVirtualMachineFlag(ctx)
+	cmd.VirtualMachineFlag.Register(ctx, f)
+	cmd.NetworkFlag, ctx = flags.NewNetworkFlag(ctx)
+	cmd.NetworkFlag.Register(ctx, f)
+}
 
-func (cmd *add) Process() error { return nil }
+func (cmd *add) Description() string {
+	return `Add network adapter to VM.
 
-func (cmd *add) Run(f *flag.FlagSet) error {
+Examples:
+  govc vm.network.add -vm $vm -net "VM Network" -net.adapter e1000e
+  govc device.info -vm $vm ethernet-*`
+}
+
+func (cmd *add) Process(ctx context.Context) error {
+	if err := cmd.VirtualMachineFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.NetworkFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd *add) Run(ctx context.Context, f *flag.FlagSet) error {
 	vm, err := cmd.VirtualMachineFlag.VirtualMachine()
 	if err != nil {
 		return err
@@ -58,5 +79,5 @@ func (cmd *add) Run(f *flag.FlagSet) error {
 		return err
 	}
 
-	return vm.AddDevice(context.TODO(), net)
+	return vm.AddDevice(ctx, net)
 }

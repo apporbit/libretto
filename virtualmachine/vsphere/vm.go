@@ -22,7 +22,7 @@ import (
 	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25/types"
 
-	"golang.org/x/net/context"
+	"context"
 )
 
 type vmwareFinder struct {
@@ -50,7 +50,7 @@ type VMwareLease struct {
 // HTTPNfcLeaseProgress takes a percentage as an int and sets that percentage as
 // the completed percent.
 func (v VMwareLease) HTTPNfcLeaseProgress(p int) {
-	v.Lease.HttpNfcLeaseProgress(v.Ctx, p)
+	v.Lease.HttpNfcLeaseProgress(v.Ctx, int32(p))
 }
 
 // Wait waits for the underlying lease to finish.
@@ -325,6 +325,7 @@ type VM struct {
 	Datacenter string
 	// OvfPath represents the location of the OVF file on disk.
 	OvfPath string
+	OvaPathUrl string
 	// Networks defines a mapping from each network label inside the ovf file
 	// to a vSphere network. Must be available on the host or deploy will fail.
 	Networks map[string]string
@@ -427,6 +428,70 @@ func (vm *VM) Provision() (err error) {
 // GetName returns the name of this VM.
 func (vm *VM) GetName() string {
 	return vm.Name
+}
+
+func (vm *VM) AddDisk() (err error) {
+        if err := SetupSession(vm); err != nil {
+                return fmt.Errorf("Error setting up vSphere session: %s", err)
+        }
+
+        // Cancel the sdk context
+        defer vm.cancel()
+
+        // Get a reference to the datacenter with host and vm folders populated
+        dcMo, err := GetDatacenter(vm)
+        if err != nil {
+                return fmt.Errorf("Failed to retrieve datacenter: %s", err)
+        }
+
+        vmMo, err := findVM(vm, dcMo, vm.Name)
+        if err != nil {
+                return fmt.Errorf("VM not found", vm.Name, err)
+        }
+
+        if err := reconfigureVM(vm, vmMo); err != nil {
+                return fmt.Errorf("Reconfigure failed : ", err)
+        }
+        return nil
+}
+
+func (vm *VM) RemoveDisk() (err error) {
+        if err := SetupSession(vm); err != nil {
+                return fmt.Errorf("Error setting up vSphere session: %s", err)
+        }
+
+        // Cancel the sdk context
+        defer vm.cancel()
+
+        // Get a reference to the datacenter with host and vm folders populated
+        dcMo, err := GetDatacenter(vm)
+        if err != nil {
+                return fmt.Errorf("Failed to retrieve datacenter: %s", err)
+        }
+
+        vmMo, err := findVM(vm, dcMo, vm.Name)
+        if err != nil {
+                return fmt.Errorf("VM not found", vm.Name, err)
+        }
+        var deviceMo *types.VirtualDisk
+        spec := new(types.VirtualMachineConfigSpec)
+        for _, d := range vmMo.Config.Hardware.Device {
+                switch device := d.(type) {
+                case *types.VirtualDisk:
+                        deviceMo = device
+                }
+        }
+        removeOp := &types.VirtualDeviceConfigSpec{
+                Operation: types.VirtualDeviceConfigSpecOperationRemove,
+                Device:    deviceMo.GetVirtualDevice(),
+        }
+        spec.DeviceChange = append(spec.DeviceChange, removeOp)
+
+	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+        if err = vmo.RemoveDevice(vm.ctx, false, deviceMo); err != nil {
+                fmt.Errorf("Delete disk task returned an error : ", err)
+        }
+        return nil
 }
 
 // GetIPs returns the IPs of this VM. Returns all the IPs known to the API for

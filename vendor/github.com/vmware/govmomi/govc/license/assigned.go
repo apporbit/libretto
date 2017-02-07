@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package license
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -27,34 +28,51 @@ import (
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/license"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type assigned struct {
 	*flags.ClientFlag
 	*flags.OutputFlag
+
+	id string
 }
 
 func init() {
-	cli.Register("license.assigned.list", &assigned{})
+	cli.Register("license.assigned.ls", &assigned{})
 }
 
-func (cmd *assigned) Register(f *flag.FlagSet) {}
+func (cmd *assigned) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	cmd.ClientFlag.Register(ctx, f)
 
-func (cmd *assigned) Process() error { return nil }
+	cmd.OutputFlag, ctx = flags.NewOutputFlag(ctx)
+	cmd.OutputFlag.Register(ctx, f)
 
-func (cmd *assigned) Run(f *flag.FlagSet) error {
+	f.StringVar(&cmd.id, "id", "", "Entity ID")
+}
+
+func (cmd *assigned) Process(ctx context.Context) error {
+	if err := cmd.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.OutputFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd *assigned) Run(ctx context.Context, f *flag.FlagSet) error {
 	client, err := cmd.Client()
 	if err != nil {
 		return err
 	}
 
-	m, err := license.NewManager(client).AssignmentManager(context.TODO())
+	m, err := license.NewManager(client).AssignmentManager(ctx)
 	if err != nil {
 		return err
 	}
 
-	assigned, err := m.QueryAssigned(context.TODO(), "")
+	assigned, err := m.QueryAssigned(ctx, cmd.id)
 	if err != nil {
 		return err
 	}

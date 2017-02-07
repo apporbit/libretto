@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,12 +17,13 @@ limitations under the License.
 package event
 
 import (
+	"context"
+
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/methods"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type HistoryCollector struct {
@@ -46,7 +47,7 @@ func (h HistoryCollector) LatestPage(ctx context.Context) ([]types.BaseEvent, er
 	return o.LatestPage, nil
 }
 
-func (h HistoryCollector) ReadNextEvents(ctx context.Context, maxCount int) ([]types.BaseEvent, error) {
+func (h HistoryCollector) ReadNextEvents(ctx context.Context, maxCount int32) ([]types.BaseEvent, error) {
 	req := types.ReadNextEvents{
 		This:     h.Reference(),
 		MaxCount: maxCount,
@@ -60,7 +61,7 @@ func (h HistoryCollector) ReadNextEvents(ctx context.Context, maxCount int) ([]t
 	return res.Returnval, nil
 }
 
-func (h HistoryCollector) ReadPreviousEvents(ctx context.Context, maxCount int) ([]types.BaseEvent, error) {
+func (h HistoryCollector) ReadPreviousEvents(ctx context.Context, maxCount int32) ([]types.BaseEvent, error) {
 	req := types.ReadPreviousEvents{
 		This:     h.Reference(),
 		MaxCount: maxCount,

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package vm
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"strings"
@@ -24,7 +25,6 @@ import (
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type extraConfig []types.BaseOptionValue
@@ -34,7 +34,7 @@ func (e *extraConfig) String() string {
 }
 
 func (e *extraConfig) Set(v string) error {
-	r := strings.Split(v, "=")
+	r := strings.SplitN(v, "=", 2)
 	if len(r) < 2 {
 		return fmt.Errorf("failed to parse extraConfig: %s", v)
 	} else if r[1] == "" {
@@ -55,17 +55,36 @@ func init() {
 	cli.Register("vm.change", &change{})
 }
 
-func (cmd *change) Register(f *flag.FlagSet) {
+func (cmd *change) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.VirtualMachineFlag, ctx = flags.NewVirtualMachineFlag(ctx)
+	cmd.VirtualMachineFlag.Register(ctx, f)
+
 	f.Int64Var(&cmd.MemoryMB, "m", 0, "Size in MB of memory")
-	f.IntVar(&cmd.NumCPUs, "c", 0, "Number of CPUs")
+	f.Var(flags.NewInt32(&cmd.NumCPUs), "c", "Number of CPUs")
 	f.StringVar(&cmd.GuestId, "g", "", "Guest OS")
 	f.StringVar(&cmd.Name, "name", "", "Display name")
 	f.Var(&cmd.extraConfig, "e", "ExtraConfig. <key>=<value>")
+
+	f.Var(flags.NewOptionalBool(&cmd.NestedHVEnabled), "nested-hv-enabled", "Enable nested hardware-assisted virtualization")
+	cmd.Tools = &types.ToolsConfigInfo{}
+	f.Var(flags.NewOptionalBool(&cmd.Tools.SyncTimeWithHost), "sync-time-with-host", "Enable SyncTimeWithHost")
 }
 
-func (cmd *change) Process() error { return nil }
+func (cmd *change) Description() string {
+	return `Change VM configuration.
 
-func (cmd *change) Run(f *flag.FlagSet) error {
+Examples:
+  govc vm.change -vm $vm -e smc.present=TRUE -e ich7m.present=TRUE`
+}
+
+func (cmd *change) Process(ctx context.Context) error {
+	if err := cmd.VirtualMachineFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd *change) Run(ctx context.Context, f *flag.FlagSet) error {
 	vm, err := cmd.VirtualMachine()
 	if err != nil {
 		return err
@@ -79,10 +98,10 @@ func (cmd *change) Run(f *flag.FlagSet) error {
 		cmd.VirtualMachineConfigSpec.ExtraConfig = cmd.extraConfig
 	}
 
-	task, err := vm.Reconfigure(context.TODO(), cmd.VirtualMachineConfigSpec)
+	task, err := vm.Reconfigure(ctx, cmd.VirtualMachineConfigSpec)
 	if err != nil {
 		return err
 	}
 
-	return task.Wait(context.TODO())
+	return task.Wait(ctx)
 }

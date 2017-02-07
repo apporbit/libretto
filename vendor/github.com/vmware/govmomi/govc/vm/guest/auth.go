@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package guest
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
@@ -27,6 +28,10 @@ import (
 
 type AuthFlag struct {
 	auth types.NamePasswordAuthentication
+}
+
+func newAuthFlag(ctx context.Context) (*AuthFlag, context.Context) {
+	return &AuthFlag{}, ctx
 }
 
 func (flag *AuthFlag) String() string {
@@ -45,7 +50,7 @@ func (flag *AuthFlag) Set(s string) error {
 	return nil
 }
 
-func (flag *AuthFlag) Register(f *flag.FlagSet) {
+func (flag *AuthFlag) Register(ctx context.Context, f *flag.FlagSet) {
 	env := "GOVC_GUEST_LOGIN"
 	value := os.Getenv(env)
 	flag.Set(value)
@@ -53,7 +58,7 @@ func (flag *AuthFlag) Register(f *flag.FlagSet) {
 	f.Var(flag, "l", usage)
 }
 
-func (flag *AuthFlag) Process() error {
+func (flag *AuthFlag) Process(ctx context.Context) error {
 	return nil
 }
 

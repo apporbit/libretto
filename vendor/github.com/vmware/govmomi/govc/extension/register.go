@@ -17,9 +17,9 @@ limitations under the License.
 package extension
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"os"
 	"time"
 
@@ -27,7 +27,6 @@ import (
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type register struct {
@@ -40,15 +39,21 @@ func init() {
 	cli.Register("extension.register", &register{})
 }
 
-func (cmd *register) Register(f *flag.FlagSet) {
+func (cmd *register) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	cmd.ClientFlag.Register(ctx, f)
+
 	f.BoolVar(&cmd.update, "update", false, "Update extension")
 }
 
-func (cmd *register) Process() error { return nil }
+func (cmd *register) Process(ctx context.Context) error {
+	if err := cmd.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
-func (cmd *register) Run(f *flag.FlagSet) error {
-	ctx := context.TODO()
-
+func (cmd *register) Run(ctx context.Context, f *flag.FlagSet) error {
 	c, err := cmd.Client()
 	if err != nil {
 		return err
@@ -59,15 +64,10 @@ func (cmd *register) Run(f *flag.FlagSet) error {
 		return err
 	}
 
-	b, err := ioutil.ReadAll(os.Stdin)
-	if err != nil {
-		return err
-	}
-
 	var e types.Extension
 	e.Description = new(types.Description)
 
-	if err = json.Unmarshal(b, &e); err != nil {
+	if err = json.NewDecoder(os.Stdin).Decode(&e); err != nil {
 		return err
 	}
 

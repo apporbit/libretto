@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,13 @@ limitations under the License.
 package datastore
 
 import (
+	"context"
 	"errors"
 	"flag"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
-	"golang.org/x/net/context"
 )
 
 type mv struct {
@@ -36,17 +36,25 @@ func init() {
 	cli.Register("datastore.mv", &mv{})
 }
 
-func (cmd *mv) Register(f *flag.FlagSet) {
+func (cmd *mv) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.DatastoreFlag, ctx = flags.NewDatastoreFlag(ctx)
+	cmd.DatastoreFlag.Register(ctx, f)
+
 	f.BoolVar(&cmd.force, "f", false, "If true, overwrite any identically named file at the destination")
 }
 
-func (cmd *mv) Process() error { return nil }
+func (cmd *mv) Process(ctx context.Context) error {
+	if err := cmd.DatastoreFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *mv) Usage() string {
 	return "SRC DST"
 }
 
-func (cmd *mv) Run(f *flag.FlagSet) error {
+func (cmd *mv) Run(ctx context.Context, f *flag.FlagSet) error {
 	args := f.Args()
 	if len(args) != 2 {
 		return errors.New("SRC and DST arguments are required")
@@ -75,10 +83,10 @@ func (cmd *mv) Run(f *flag.FlagSet) error {
 	}
 
 	m := object.NewFileManager(c)
-	task, err := m.MoveDatastoreFile(context.TODO(), src, dc, dst, dc, cmd.force)
+	task, err := m.MoveDatastoreFile(ctx, src, dc, dst, dc, cmd.force)
 	if err != nil {
 		return err
 	}
 
-	return task.Wait(context.TODO())
+	return task.Wait(ctx)
 }

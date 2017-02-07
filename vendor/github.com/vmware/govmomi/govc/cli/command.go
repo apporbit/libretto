@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,58 +17,32 @@ limitations under the License.
 package cli
 
 import (
+	"context"
 	"flag"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
-	"reflect"
 	"sort"
 	"text/tabwriter"
 )
 
 type HasFlags interface {
 	// Register may be called more than once and should be idempotent.
-	Register(f *flag.FlagSet)
+	Register(ctx context.Context, f *flag.FlagSet)
 
 	// Process may be called more than once and should be idempotent.
-	Process() error
+	Process(ctx context.Context) error
 }
 
 type Command interface {
 	HasFlags
 
-	Run(f *flag.FlagSet) error
+	Run(ctx context.Context, f *flag.FlagSet) error
 }
 
-var hasFlagsType = reflect.TypeOf((*HasFlags)(nil)).Elem()
-
-func RegisterCommand(h HasFlags, f *flag.FlagSet) {
-	visited := make(map[interface{}]struct{})
-	Walk(h, hasFlagsType, func(v interface{}) error {
-		if _, ok := visited[v]; ok {
-			return nil
-		}
-		visited[v] = struct{}{}
-		v.(HasFlags).Register(f)
-		return nil
-	})
-}
-
-func ProcessCommand(h HasFlags) error {
-	visited := make(map[interface{}]struct{})
-	err := Walk(h, hasFlagsType, func(v interface{}) error {
-		if _, ok := visited[v]; ok {
-			return nil
-		}
-		visited[v] = struct{}{}
-		err := v.(HasFlags).Process()
-		return err
-	})
-	return err
-}
-
-func generalHelp() {
-	fmt.Fprintf(os.Stderr, "Usage of %s:\n", os.Args[0])
+func generalHelp(w io.Writer) {
+	fmt.Fprintf(w, "Usage of %s:\n", os.Args[0])
 
 	cmds := []string{}
 	for name := range commands {
@@ -78,27 +52,27 @@ func generalHelp() {
 	sort.Strings(cmds)
 
 	for _, name := range cmds {
-		fmt.Fprintf(os.Stderr, "  %s\n", name)
+		fmt.Fprintf(w, "  %s\n", name)
 	}
 }
 
-func commandHelp(name string, cmd Command, f *flag.FlagSet) {
+func commandHelp(w io.Writer, name string, cmd Command, f *flag.FlagSet) {
 	type HasUsage interface {
 		Usage() string
 	}
 
-	fmt.Fprintf(os.Stderr, "Usage: %s %s [OPTIONS]", os.Args[0], name)
+	fmt.Fprintf(w, "Usage: %s %s [OPTIONS]", os.Args[0], name)
 	if u, ok := cmd.(HasUsage); ok {
-		fmt.Fprintf(os.Stderr, " %s", u.Usage())
+		fmt.Fprintf(w, " %s", u.Usage())
 	}
-	fmt.Fprintf(os.Stderr, "\n")
+	fmt.Fprintf(w, "\n")
 
 	type HasDescription interface {
 		Description() string
 	}
 
 	if u, ok := cmd.(HasDescription); ok {
-		fmt.Fprintf(os.Stderr, "%s\n", u.Description())
+		fmt.Fprintf(w, "\n%s\n", u.Description())
 	}
 
 	n := 0
@@ -107,8 +81,8 @@ func commandHelp(name string, cmd Command, f *flag.FlagSet) {
 	})
 
 	if n > 0 {
-		fmt.Fprintf(os.Stderr, "\nOptions:\n")
-		tw := tabwriter.NewWriter(os.Stderr, 2, 0, 2, ' ', 0)
+		fmt.Fprintf(w, "\nOptions:\n")
+		tw := tabwriter.NewWriter(w, 2, 0, 2, ' ', 0)
 		f.VisitAll(func(f *flag.Flag) {
 			fmt.Fprintf(tw, "\t-%s=%s\t%s\n", f.Name, f.DefValue, f.Usage)
 		})
@@ -116,10 +90,33 @@ func commandHelp(name string, cmd Command, f *flag.FlagSet) {
 	}
 }
 
+func clientLogout(ctx context.Context, cmd Command) error {
+	type logout interface {
+		Logout(context.Context) error
+	}
+
+	if l, ok := cmd.(logout); ok {
+		return l.Logout(ctx)
+	}
+
+	return nil
+}
+
 func Run(args []string) int {
+	hw := os.Stderr
+	rc := 1
+	hwrc := func(arg string) {
+		if arg == "-h" {
+			hw = os.Stdout
+			rc = 0
+		}
+	}
+
+	var err error
+
 	if len(args) == 0 {
-		generalHelp()
-		return 1
+		generalHelp(hw)
+		return rc
 	}
 
 	// Look up real command name in aliases table.
@@ -130,41 +127,46 @@ func Run(args []string) int {
 
 	cmd, ok := commands[name]
 	if !ok {
-		generalHelp()
-		return 1
+		hwrc(name)
+		generalHelp(hw)
+		return rc
 	}
 
-	f := flag.NewFlagSet("", flag.ContinueOnError)
-	f.SetOutput(ioutil.Discard)
+	fs := flag.NewFlagSet("", flag.ContinueOnError)
+	fs.SetOutput(ioutil.Discard)
 
-	RegisterCommand(cmd, f)
+	ctx := context.Background()
+	cmd.Register(ctx, fs)
 
-	if err := f.Parse(args[1:]); err != nil {
-		if err == flag.ErrHelp {
-			commandHelp(args[0], cmd, f)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		}
-		return 1
+	if err = fs.Parse(args[1:]); err != nil {
+		goto error
 	}
 
-	if err := ProcessCommand(cmd); err != nil {
-		if err == flag.ErrHelp {
-			commandHelp(args[0], cmd, f)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		}
-		return 1
+	if err = cmd.Process(ctx); err != nil {
+		goto error
 	}
 
-	if err := cmd.Run(f); err != nil {
-		if err == flag.ErrHelp {
-			commandHelp(args[0], cmd, f)
-		} else {
-			fmt.Fprintf(os.Stderr, "Error: %s\n", err)
-		}
-		return 1
+	if err = cmd.Run(ctx, fs); err != nil {
+		goto error
+	}
+
+	if err = clientLogout(ctx, cmd); err != nil {
+		goto error
 	}
 
 	return 0
+
+error:
+	if err == flag.ErrHelp {
+		if len(args) == 2 {
+			hwrc(args[1])
+		}
+		commandHelp(hw, args[0], cmd, fs)
+	} else {
+		fmt.Fprintf(os.Stderr, "%s: %s\n", os.Args[0], err)
+	}
+
+	_ = clientLogout(ctx, cmd)
+
+	return rc
 }

@@ -17,12 +17,13 @@ limitations under the License.
 package vapp
 
 import (
+	"context"
 	"flag"
 
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
-	"golang.org/x/net/context"
+	"github.com/vmware/govmomi/vim25/types"
 )
 
 type destroy struct {
@@ -33,15 +34,23 @@ func init() {
 	cli.Register("vapp.destroy", &destroy{})
 }
 
-func (cmd *destroy) Register(f *flag.FlagSet) {}
+func (cmd *destroy) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.DatacenterFlag, ctx = flags.NewDatacenterFlag(ctx)
+	cmd.DatacenterFlag.Register(ctx, f)
+}
 
-func (cmd *destroy) Process() error { return nil }
+func (cmd *destroy) Process(ctx context.Context) error {
+	if err := cmd.DatacenterFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *destroy) Usage() string {
 	return "VAPP..."
 }
 
-func (cmd *destroy) Run(f *flag.FlagSet) error {
+func (cmd *destroy) Run(ctx context.Context, f *flag.FlagSet) error {
 	if f.NArg() == 0 {
 		return flag.ErrHelp
 	}
@@ -52,7 +61,7 @@ func (cmd *destroy) Run(f *flag.FlagSet) error {
 	}
 
 	for _, arg := range f.Args() {
-		vapps, err := finder.VirtualAppList(context.TODO(), arg)
+		vapps, err := finder.VirtualAppList(ctx, arg)
 		if err != nil {
 			if _, ok := err.(*find.NotFoundError); ok {
 				// Ignore if vapp cannot be found
@@ -63,21 +72,40 @@ func (cmd *destroy) Run(f *flag.FlagSet) error {
 		}
 
 		for _, vapp := range vapps {
-			task, err := vapp.PowerOffVApp_Task(context.TODO(), false)
-			if err != nil {
-				return err
+			powerOff := func() error {
+				task, err := vapp.PowerOff(ctx, false)
+				if err != nil {
+					return err
+				}
+				err = task.Wait(ctx)
+				if err != nil {
+					// it's safe to ignore if the vapp is already powered off
+					if f, ok := err.(types.HasFault); ok {
+						switch f.Fault().(type) {
+						case *types.InvalidPowerState:
+							return nil
+						}
+					}
+					return err
+				}
+				return nil
 			}
-			err = task.Wait(context.TODO())
-			if err != nil {
+			if err := powerOff(); err != nil {
 				return err
 			}
 
-			task, err = vapp.Destroy(context.TODO())
-			if err != nil {
-				return err
+			destroy := func() error {
+				task, err := vapp.Destroy(ctx)
+				if err != nil {
+					return err
+				}
+				err = task.Wait(ctx)
+				if err != nil {
+					return err
+				}
+				return nil
 			}
-			err = task.Wait(context.TODO())
-			if err != nil {
+			if err := destroy(); err != nil {
 				return err
 			}
 		}

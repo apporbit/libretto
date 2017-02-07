@@ -17,28 +17,43 @@ limitations under the License.
 package flags
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/vmware/govmomi/object"
-	"golang.org/x/net/context"
 )
 
 type VirtualAppFlag struct {
+	common
+
 	*DatacenterFlag
 	*SearchFlag
 
-	register sync.Once
-	name     string
-	app      *object.VirtualApp
+	name string
+	app  *object.VirtualApp
 }
 
-func (flag *VirtualAppFlag) Register(f *flag.FlagSet) {
-	flag.SearchFlag = NewSearchFlag(SearchVirtualApps)
+var virtualAppFlagKey = flagKey("virtualApp")
 
-	flag.register.Do(func() {
+func NewVirtualAppFlag(ctx context.Context) (*VirtualAppFlag, context.Context) {
+	if v := ctx.Value(virtualAppFlagKey); v != nil {
+		return v.(*VirtualAppFlag), ctx
+	}
+
+	v := &VirtualAppFlag{}
+	v.DatacenterFlag, ctx = NewDatacenterFlag(ctx)
+	v.SearchFlag, ctx = NewSearchFlag(ctx, SearchVirtualApps)
+	ctx = context.WithValue(ctx, virtualAppFlagKey, v)
+	return v, ctx
+}
+
+func (flag *VirtualAppFlag) Register(ctx context.Context, f *flag.FlagSet) {
+	flag.RegisterOnce(func() {
+		flag.DatacenterFlag.Register(ctx, f)
+		flag.SearchFlag.Register(ctx, f)
+
 		env := "GOVC_VAPP"
 		value := os.Getenv(env)
 		usage := fmt.Sprintf("Virtual App [%s]", env)
@@ -46,9 +61,21 @@ func (flag *VirtualAppFlag) Register(f *flag.FlagSet) {
 	})
 }
 
-func (flag *VirtualAppFlag) Process() error { return nil }
+func (flag *VirtualAppFlag) Process(ctx context.Context) error {
+	return flag.ProcessOnce(func() error {
+		if err := flag.DatacenterFlag.Process(ctx); err != nil {
+			return err
+		}
+		if err := flag.SearchFlag.Process(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
+}
 
 func (flag *VirtualAppFlag) VirtualApp() (*object.VirtualApp, error) {
+	ctx := context.TODO()
+
 	if flag.app != nil {
 		return flag.app, nil
 	}
@@ -74,6 +101,6 @@ func (flag *VirtualAppFlag) VirtualApp() (*object.VirtualApp, error) {
 		return nil, err
 	}
 
-	flag.app, err = finder.VirtualApp(context.TODO(), flag.name)
+	flag.app, err = finder.VirtualApp(ctx, flag.name)
 	return flag.app, err
 }

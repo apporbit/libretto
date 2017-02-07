@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,13 +17,16 @@ limitations under the License.
 package disk
 
 import (
+	"context"
 	"errors"
 	"flag"
+	"fmt"
+	"strings"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/units"
-	"golang.org/x/net/context"
+	"github.com/vmware/govmomi/vim25/types"
 )
 
 type create struct {
@@ -34,13 +37,32 @@ type create struct {
 	controller string
 	Name       string
 	Bytes      units.ByteSize
+	Thick      bool
+	Eager      bool
+	DiskMode   string
+}
+
+var vdmTypes = []string{
+	string(types.VirtualDiskModePersistent),
+	string(types.VirtualDiskModeNonpersistent),
+	string(types.VirtualDiskModeUndoable),
+	string(types.VirtualDiskModeIndependent_persistent),
+	string(types.VirtualDiskModeIndependent_nonpersistent),
+	string(types.VirtualDiskModeAppend),
 }
 
 func init() {
 	cli.Register("vm.disk.create", &create{})
 }
 
-func (cmd *create) Register(f *flag.FlagSet) {
+func (cmd *create) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.DatastoreFlag, ctx = flags.NewDatastoreFlag(ctx)
+	cmd.DatastoreFlag.Register(ctx, f)
+	cmd.OutputFlag, ctx = flags.NewOutputFlag(ctx)
+	cmd.OutputFlag.Register(ctx, f)
+	cmd.VirtualMachineFlag, ctx = flags.NewVirtualMachineFlag(ctx)
+	cmd.VirtualMachineFlag.Register(ctx, f)
+
 	err := (&cmd.Bytes).Set("10G")
 	if err != nil {
 		panic(err)
@@ -49,11 +71,25 @@ func (cmd *create) Register(f *flag.FlagSet) {
 	f.StringVar(&cmd.controller, "controller", "", "Disk controller")
 	f.StringVar(&cmd.Name, "name", "", "Name for new disk")
 	f.Var(&cmd.Bytes, "size", "Size of new disk")
+	f.BoolVar(&cmd.Thick, "thick", false, "Thick provision new disk")
+	f.BoolVar(&cmd.Eager, "eager", false, "Eagerly scrub new disk")
+	f.StringVar(&cmd.DiskMode, "mode", "persistent", fmt.Sprintf("Disk mode (%s)", strings.Join(vdmTypes, "|")))
 }
 
-func (cmd *create) Process() error { return nil }
+func (cmd *create) Process(ctx context.Context) error {
+	if err := cmd.DatastoreFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.OutputFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.VirtualMachineFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
-func (cmd *create) Run(f *flag.FlagSet) error {
+func (cmd *create) Run(ctx context.Context, f *flag.FlagSet) error {
 	if len(cmd.Name) == 0 {
 		return errors.New("please specify a disk name")
 	}
@@ -71,7 +107,7 @@ func (cmd *create) Run(f *flag.FlagSet) error {
 		return err
 	}
 
-	devices, err := vm.Device(context.TODO())
+	devices, err := vm.Device(ctx)
 	if err != nil {
 		return err
 	}
@@ -81,7 +117,18 @@ func (cmd *create) Run(f *flag.FlagSet) error {
 		return err
 	}
 
-	disk := devices.CreateDisk(controller, ds.Path(cmd.Name))
+	vdmMatch := false
+	for _, vdm := range vdmTypes {
+		if cmd.DiskMode == vdm {
+			vdmMatch = true
+		}
+	}
+
+	if vdmMatch == false {
+		return errors.New("please specify a valid disk mode")
+	}
+
+	disk := devices.CreateDisk(controller, ds.Reference(), ds.Path(cmd.Name))
 
 	existing := devices.SelectByBackingInfo(disk.Backing)
 
@@ -90,7 +137,16 @@ func (cmd *create) Run(f *flag.FlagSet) error {
 		return nil
 	}
 
+	backing := disk.Backing.(*types.VirtualDiskFlatVer2BackingInfo)
+
+	if cmd.Thick {
+		backing.ThinProvisioned = types.NewBool(false)
+		backing.EagerlyScrub = types.NewBool(cmd.Eager)
+	}
+
+	backing.DiskMode = cmd.DiskMode
+
 	cmd.Log("Creating disk\n")
 	disk.CapacityInKB = int64(cmd.Bytes) / 1024
-	return vm.AddDevice(context.TODO(), disk)
+	return vm.AddDevice(ctx, disk)
 }

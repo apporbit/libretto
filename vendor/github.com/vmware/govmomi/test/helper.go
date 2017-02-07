@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package test
 
 import (
+	"context"
 	"net/url"
 	"os"
 	"testing"
@@ -25,7 +26,6 @@ import (
 	"github.com/vmware/govmomi/vim25/methods"
 	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 // URL parses the GOVMOMI_TEST_URL environment variable if set.
@@ -34,7 +34,7 @@ func URL() *url.URL {
 	if s == "" {
 		return nil
 	}
-	u, err := url.Parse(s)
+	u, err := soap.ParseURL(s)
 	if err != nil {
 		panic(err)
 	}

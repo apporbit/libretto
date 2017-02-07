@@ -17,9 +17,9 @@ limitations under the License.
 package importx
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"os"
 
 	"github.com/vmware/govmomi/ovf"
@@ -29,6 +29,11 @@ import (
 type Property struct {
 	types.KeyValue
 	Spec *ovf.Property `json:",omitempty"`
+}
+
+type Network struct {
+	Name    string
+	Network string
 }
 
 type Options struct {
@@ -46,9 +51,14 @@ type Options struct {
 
 	PropertyMapping []Property `json:",omitempty"`
 
+	NetworkMapping []Network `json:",omitempty"`
+
+	Annotation string `json:",omitempty"`
+
 	PowerOn      bool
 	InjectOvfEnv bool
 	WaitForIP    bool
+	Name         *string
 }
 
 type OptionsFlag struct {
@@ -57,27 +67,29 @@ type OptionsFlag struct {
 	path string
 }
 
-func (flag *OptionsFlag) Register(f *flag.FlagSet) {
+func newOptionsFlag(ctx context.Context) (*OptionsFlag, context.Context) {
+	return &OptionsFlag{}, ctx
+}
+
+func (flag *OptionsFlag) Register(ctx context.Context, f *flag.FlagSet) {
 	f.StringVar(&flag.path, "options", "", "Options spec file path for VM deployment")
 }
 
-func (flag *OptionsFlag) Process() error {
-	if len(flag.path) > 0 {
-		f, err := os.Open(flag.path)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-
-		o, err := ioutil.ReadAll(f)
-		if err != nil {
-			return err
-		}
-
-		if err := json.Unmarshal(o, &flag.Options); err != nil {
-			return err
-		}
+func (flag *OptionsFlag) Process(ctx context.Context) error {
+	if len(flag.path) == 0 {
+		return nil
 	}
 
-	return nil
+	var err error
+	in := os.Stdin
+
+	if flag.path != "-" {
+		in, err = os.Open(flag.path)
+		if err != nil {
+			return err
+		}
+		defer in.Close()
+	}
+
+	return json.NewDecoder(in).Decode(&flag.Options)
 }

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package vm
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -33,7 +34,6 @@ import (
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type intRange struct {
@@ -79,8 +79,9 @@ func init() {
 	cli.Register("vm.vnc", cmd)
 }
 
-func (cmd *vnc) Register(f *flag.FlagSet) {
-	cmd.SearchFlag = flags.NewSearchFlag(flags.SearchVirtualMachines)
+func (cmd *vnc) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.SearchFlag, ctx = flags.NewSearchFlag(ctx, flags.SearchVirtualMachines)
+	cmd.SearchFlag.Register(ctx, f)
 
 	f.BoolVar(&cmd.Enable, "enable", false, "Enable VNC")
 	f.BoolVar(&cmd.Disable, "disable", false, "Disable VNC")
@@ -89,7 +90,10 @@ func (cmd *vnc) Register(f *flag.FlagSet) {
 	f.StringVar(&cmd.Password, "password", "", "VNC password")
 }
 
-func (cmd *vnc) Process() error {
+func (cmd *vnc) Process(ctx context.Context) error {
+	if err := cmd.SearchFlag.Process(ctx); err != nil {
+		return err
+	}
 	// Either may be true or none may be true.
 	if cmd.Enable && cmd.Disable {
 		return flag.ErrHelp
@@ -103,14 +107,17 @@ func (cmd *vnc) Usage() string {
 }
 
 func (cmd *vnc) Description() string {
-	return `VNC controls for VM(s).
+	return `Enable or disable VNC for VM.
 
-Port numbers are automatically chosen from a range if not specified.
+Port numbers are automatically chosen if not specified.
 
-If neither -enable or -disable is specified, the current state is returned.`
+If neither -enable or -disable is specified, the current state is returned.
+
+Examples:
+  govc vm.vnc -enable -password 1234 $vm | awk '{print $2}' | xargs open`
 }
 
-func (cmd *vnc) Run(f *flag.FlagSet) error {
+func (cmd *vnc) Run(ctx context.Context, f *flag.FlagSet) error {
 	vms, err := cmd.loadVMs(f.Args())
 	if err != nil {
 		return err
@@ -201,7 +208,8 @@ func newVNCVM(c *vim25.Client, vm *object.VirtualMachine) (*vncVM, error) {
 	}
 
 	pc := property.DefaultCollector(c)
-	err := pc.RetrieveOne(context.TODO(), vm.Reference(), virtualMachineProperties, &v.mvm)
+	ctx := context.TODO()
+	err := pc.RetrieveOne(ctx, vm.Reference(), virtualMachineProperties, &v.mvm)
 	if err != nil {
 		return nil, err
 	}
@@ -255,12 +263,13 @@ func (v *vncVM) reconfigure() error {
 		ExtraConfig: v.newOptions.ToExtraConfig(),
 	}
 
-	task, err := v.vm.Reconfigure(context.TODO(), spec)
+	ctx := context.TODO()
+	task, err := v.vm.Reconfigure(ctx, spec)
 	if err != nil {
 		return err
 	}
 
-	return task.Wait(context.TODO())
+	return task.Wait(ctx)
 }
 
 func (v *vncVM) uri() (string, error) {
@@ -278,7 +287,7 @@ func (v *vncVM) uri() (string, error) {
 }
 
 func (v *vncVM) write(w io.Writer) error {
-	if v.newOptions["enabled"] == "true" {
+	if strings.EqualFold(v.newOptions["enabled"], "true") {
 		uri, err := v.uri()
 		if err != nil {
 			return err
@@ -323,6 +332,7 @@ func newVNCHost(c *vim25.Client, host *object.HostSystem, low, high int) (*vncHo
 }
 
 func loadUsedPorts(c *vim25.Client, host types.ManagedObjectReference) ([]int, error) {
+	ctx := context.TODO()
 	ospec := types.ObjectSpec{
 		Obj: host,
 		SelectSet: []types.BaseSelectionSpec{
@@ -351,7 +361,7 @@ func loadUsedPorts(c *vim25.Client, host types.ManagedObjectReference) ([]int, e
 	}
 
 	var vms []mo.VirtualMachine
-	err := mo.RetrievePropertiesForRequest(context.TODO(), c, req, &vms)
+	err := mo.RetrievePropertiesForRequest(ctx, c, req, &vms)
 	if err != nil {
 		return nil, err
 	}
@@ -381,7 +391,7 @@ func (h *vncHost) popUnusedPort() (int, error) {
 
 	// Return first port we get when iterating
 	var port int
-	for port, _ = range h.ports {
+	for port = range h.ports {
 		break
 	}
 	delete(h.ports, port)
@@ -389,11 +399,12 @@ func (h *vncHost) popUnusedPort() (int, error) {
 }
 
 func (h *vncHost) managementIP() (string, error) {
+	ctx := context.TODO()
 	if h.ip != "" {
 		return h.ip, nil
 	}
 
-	ips, err := h.host.ManagementIPs(context.TODO())
+	ips, err := h.host.ManagementIPs(ctx)
 	if err != nil {
 		return "", err
 	}

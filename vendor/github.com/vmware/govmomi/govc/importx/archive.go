@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package importx
 
 import (
 	"archive/tar"
+	"context"
 	"flag"
 	"fmt"
 	"io"
@@ -35,9 +36,16 @@ type ArchiveFlag struct {
 	Archive
 }
 
-func (f *ArchiveFlag) Register(fs *flag.FlagSet) { return }
+func newArchiveFlag(ctx context.Context) (*ArchiveFlag, context.Context) {
+	return &ArchiveFlag{}, ctx
+}
 
-func (f *ArchiveFlag) Process() error { return nil }
+func (f *ArchiveFlag) Register(ctx context.Context, fs *flag.FlagSet) {
+}
+
+func (f *ArchiveFlag) Process(ctx context.Context) error {
+	return nil
+}
 
 func (f *ArchiveFlag) ReadOvf(fpath string) ([]byte, error) {
 	r, _, err := f.Archive.Open(fpath)

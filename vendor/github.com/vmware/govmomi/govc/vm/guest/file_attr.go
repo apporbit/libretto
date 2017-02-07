@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,8 +17,10 @@ limitations under the License.
 package guest
 
 import (
+	"context"
 	"flag"
 
+	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/vim25/types"
 )
 
@@ -26,13 +28,17 @@ type FileAttrFlag struct {
 	types.GuestPosixFileAttributes
 }
 
-func (flag *FileAttrFlag) Register(f *flag.FlagSet) {
-	f.IntVar(&flag.OwnerId, "uid", 0, "User ID")
-	f.IntVar(&flag.GroupId, "gid", 0, "Group ID")
+func newFileAttrFlag(ctx context.Context) (*FileAttrFlag, context.Context) {
+	return &FileAttrFlag{}, ctx
+}
+
+func (flag *FileAttrFlag) Register(ctx context.Context, f *flag.FlagSet) {
+	f.Var(flags.NewInt32(&flag.OwnerId), "uid", "User ID")
+	f.Var(flags.NewInt32(&flag.GroupId), "gid", "Group ID")
 	f.Int64Var(&flag.Permissions, "perm", 0, "File permissions")
 }
 
-func (flag *FileAttrFlag) Process() error {
+func (flag *FileAttrFlag) Process(ctx context.Context) error {
 	return nil
 }
 

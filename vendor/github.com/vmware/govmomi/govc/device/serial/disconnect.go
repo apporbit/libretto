@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,11 +17,11 @@ limitations under the License.
 package serial
 
 import (
+	"context"
 	"flag"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
-	"golang.org/x/net/context"
 )
 
 type disconnect struct {
@@ -34,13 +34,30 @@ func init() {
 	cli.Register("device.serial.disconnect", &disconnect{})
 }
 
-func (cmd *disconnect) Register(f *flag.FlagSet) {
+func (cmd *disconnect) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.VirtualMachineFlag, ctx = flags.NewVirtualMachineFlag(ctx)
+	cmd.VirtualMachineFlag.Register(ctx, f)
+
 	f.StringVar(&cmd.device, "device", "", "serial port device name")
 }
 
-func (cmd *disconnect) Process() error { return nil }
+func (cmd *disconnect) Description() string {
+	return `Disconnect service URI from serial port.
 
-func (cmd *disconnect) Run(f *flag.FlagSet) error {
+Examples:
+  govc device.ls | grep serialport-
+  govc device.serial.disconnect -vm $vm -device serialport-8000
+  govc device.info -vm $vm serialport-*`
+}
+
+func (cmd *disconnect) Process(ctx context.Context) error {
+	if err := cmd.VirtualMachineFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd *disconnect) Run(ctx context.Context, f *flag.FlagSet) error {
 	vm, err := cmd.VirtualMachine()
 	if err != nil {
 		return err
@@ -50,7 +67,7 @@ func (cmd *disconnect) Run(f *flag.FlagSet) error {
 		return flag.ErrHelp
 	}
 
-	devices, err := vm.Device(context.TODO())
+	devices, err := vm.Device(ctx)
 	if err != nil {
 		return err
 	}
@@ -60,5 +77,5 @@ func (cmd *disconnect) Run(f *flag.FlagSet) error {
 		return err
 	}
 
-	return vm.EditDevice(context.TODO(), devices.DisconnectSerialPort(d))
+	return vm.EditDevice(ctx, devices.DisconnectSerialPort(d))
 }

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package scsi
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"strings"
@@ -25,7 +26,6 @@ import (
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type add struct {
@@ -40,7 +40,10 @@ func init() {
 	cli.Register("device.scsi.add", &add{})
 }
 
-func (cmd *add) Register(f *flag.FlagSet) {
+func (cmd *add) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.VirtualMachineFlag, ctx = flags.NewVirtualMachineFlag(ctx)
+	cmd.VirtualMachineFlag.Register(ctx, f)
+
 	var ctypes []string
 	ct := object.SCSIControllerTypes()
 	for _, t := range ct {
@@ -52,9 +55,23 @@ func (cmd *add) Register(f *flag.FlagSet) {
 	f.BoolVar(&cmd.hotAddRemove, "hot", false, "Enable hot-add/remove")
 }
 
-func (cmd *add) Process() error { return nil }
+func (cmd *add) Description() string {
+	return `Add SCSI controller to VM.
 
-func (cmd *add) Run(f *flag.FlagSet) error {
+Examples:
+  govc device.scsi.add -vm $vm
+  govc device.scsi.add -vm $vm -type pvscsi
+  govc device.info -vm $vm {lsi,pv}*`
+}
+
+func (cmd *add) Process(ctx context.Context) error {
+	if err := cmd.VirtualMachineFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (cmd *add) Run(ctx context.Context, f *flag.FlagSet) error {
 	vm, err := cmd.VirtualMachine()
 	if err != nil {
 		return err
@@ -64,7 +81,7 @@ func (cmd *add) Run(f *flag.FlagSet) error {
 		return flag.ErrHelp
 	}
 
-	devices, err := vm.Device(context.TODO())
+	devices, err := vm.Device(ctx)
 	if err != nil {
 		return err
 	}
@@ -78,13 +95,13 @@ func (cmd *add) Run(f *flag.FlagSet) error {
 	c.HotAddRemove = &cmd.hotAddRemove
 	c.SharedBus = types.VirtualSCSISharing(cmd.sharedBus)
 
-	err = vm.AddDevice(context.TODO(), d)
+	err = vm.AddDevice(ctx, d)
 	if err != nil {
 		return err
 	}
 
 	// output name of device we just created
-	devices, err = vm.Device(context.TODO())
+	devices, err = vm.Device(ctx)
 	if err != nil {
 		return err
 	}

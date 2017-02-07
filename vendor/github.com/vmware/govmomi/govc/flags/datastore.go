@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,64 +17,91 @@ limitations under the License.
 package flags
 
 import (
-	"errors"
+	"context"
 	"flag"
 	"fmt"
-	"net/url"
 	"os"
-	"path"
-	"sync"
 
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
-)
-
-var (
-	ErrDatastoreDirNotExist  = errors.New("datastore directory does not exist")
-	ErrDatastoreFileNotExist = errors.New("datastore file does not exist")
 )
 
 type DatastoreFlag struct {
+	common
+
 	*DatacenterFlag
 
-	register sync.Once
-	name     string
-	ds       *object.Datastore
+	Name string
+
+	ds *object.Datastore
 }
 
-func (flag *DatastoreFlag) Register(f *flag.FlagSet) {
-	flag.register.Do(func() {
+var datastoreFlagKey = flagKey("datastore")
+
+// NewCustomDatastoreFlag creates and returns a new DatastoreFlag without
+// trying to retrieve an existing one from the specified context.
+func NewCustomDatastoreFlag(ctx context.Context) (*DatastoreFlag, context.Context) {
+	v := &DatastoreFlag{}
+	v.DatacenterFlag, ctx = NewDatacenterFlag(ctx)
+	return v, ctx
+}
+
+func NewDatastoreFlag(ctx context.Context) (*DatastoreFlag, context.Context) {
+	if v := ctx.Value(datastoreFlagKey); v != nil {
+		return v.(*DatastoreFlag), ctx
+	}
+
+	v, ctx := NewCustomDatastoreFlag(ctx)
+	ctx = context.WithValue(ctx, datastoreFlagKey, v)
+	return v, ctx
+}
+
+func (f *DatastoreFlag) Register(ctx context.Context, fs *flag.FlagSet) {
+	f.RegisterOnce(func() {
+		f.DatacenterFlag.Register(ctx, fs)
+
 		env := "GOVC_DATASTORE"
 		value := os.Getenv(env)
 		usage := fmt.Sprintf("Datastore [%s]", env)
-		f.StringVar(&flag.name, "ds", value, usage)
+		fs.StringVar(&f.Name, "ds", value, usage)
 	})
 }
 
-func (flag *DatastoreFlag) Process() error { return nil }
+func (f *DatastoreFlag) Process(ctx context.Context) error {
+	return f.ProcessOnce(func() error {
+		if err := f.DatacenterFlag.Process(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
+}
 
-func (flag *DatastoreFlag) Datastore() (*object.Datastore, error) {
-	if flag.ds != nil {
-		return flag.ds, nil
+func (f *DatastoreFlag) Datastore() (*object.Datastore, error) {
+	if f.ds != nil {
+		return f.ds, nil
 	}
 
-	finder, err := flag.Finder()
+	finder, err := f.Finder()
 	if err != nil {
 		return nil, err
 	}
 
-	if flag.name == "" {
-		flag.ds, err = finder.DefaultDatastore(context.TODO())
-	} else {
-		flag.ds, err = finder.Datastore(context.TODO(), flag.name)
+	if f.ds, err = finder.DatastoreOrDefault(context.TODO(), f.Name); err != nil {
+		return nil, err
 	}
 
-	return flag.ds, err
+	return f.ds, nil
 }
 
-func (flag *DatastoreFlag) DatastorePath(name string) (string, error) {
-	ds, err := flag.Datastore()
+func (flag *DatastoreFlag) DatastoreIfSpecified() (*object.Datastore, error) {
+	if flag.Name == "" {
+		return nil, nil
+	}
+	return flag.Datastore()
+}
+
+func (f *DatastoreFlag) DatastorePath(name string) (string, error) {
+	ds, err := f.Datastore()
 	if err != nil {
 		return "", err
 	}
@@ -82,68 +109,12 @@ func (flag *DatastoreFlag) DatastorePath(name string) (string, error) {
 	return ds.Path(name), nil
 }
 
-func (flag *DatastoreFlag) DatastoreURL(path string) (*url.URL, error) {
-	dc, err := flag.Datacenter()
+func (f *DatastoreFlag) Stat(ctx context.Context, file string) (types.BaseFileInfo, error) {
+	ds, err := f.Datastore()
 	if err != nil {
 		return nil, err
 	}
 
-	ds, err := flag.Datastore()
-	if err != nil {
-		return nil, err
-	}
+	return ds.Stat(ctx, file)
 
-	u, err := ds.URL(context.TODO(), dc, path)
-	if err != nil {
-		return nil, err
-	}
-
-	return u, nil
-}
-
-func (flag *DatastoreFlag) Stat(file string) (types.BaseFileInfo, error) {
-	ds, err := flag.Datastore()
-	if err != nil {
-		return nil, err
-	}
-
-	b, err := ds.Browser(context.TODO())
-	if err != nil {
-		return nil, err
-	}
-
-	spec := types.HostDatastoreBrowserSearchSpec{
-		Details: &types.FileQueryFlags{
-			FileType:  true,
-			FileOwner: types.NewBool(true), // TODO: omitempty is generated, but seems to be required
-		},
-		MatchPattern: []string{path.Base(file)},
-	}
-
-	dsPath := ds.Path(path.Dir(file))
-	task, err := b.SearchDatastore(context.TODO(), dsPath, &spec)
-	if err != nil {
-		return nil, err
-	}
-
-	info, err := task.WaitForResult(context.TODO(), nil)
-	if err != nil {
-		if info != nil && info.Error != nil {
-			_, ok := info.Error.Fault.(*types.FileNotFound)
-			if ok {
-				// FileNotFound means the base path doesn't exist.
-				return nil, ErrDatastoreDirNotExist
-			}
-		}
-
-		return nil, err
-	}
-
-	res := info.Result.(types.HostDatastoreBrowserSearchResults)
-	if len(res.File) == 0 {
-		// File doesn't exist
-		return nil, ErrDatastoreFileNotExist
-	}
-
-	return res.File[0], nil
 }

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package importx
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -38,6 +39,7 @@ var (
 
 type spec struct {
 	*ArchiveFlag
+
 	verbose bool
 }
 
@@ -45,17 +47,25 @@ func init() {
 	cli.Register("import.spec", &spec{})
 }
 
-func (cmd *spec) Register(f *flag.FlagSet) {
+func (cmd *spec) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ArchiveFlag, ctx = newArchiveFlag(ctx)
+	cmd.ArchiveFlag.Register(ctx, f)
+
 	f.BoolVar(&cmd.verbose, "verbose", false, "Verbose spec output")
 }
 
-func (cmd *spec) Process() error { return nil }
+func (cmd *spec) Process(ctx context.Context) error {
+	if err := cmd.ArchiveFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *spec) Usage() string {
 	return "PATH_TO_OVF_OR_OVA"
 }
 
-func (cmd *spec) Run(f *flag.FlagSet) error {
+func (cmd *spec) Run(ctx context.Context, f *flag.FlagSet) error {
 	fpath := ""
 	args := f.Args()
 	if len(args) == 1 {
@@ -118,7 +128,7 @@ func (cmd *spec) Spec(fpath string) error {
 	}
 
 	var deploymentOptions = allDeploymentOptions
-	if e != nil && e.DeploymentOption.Configuration != nil {
+	if e != nil && e.DeploymentOption != nil && e.DeploymentOption.Configuration != nil {
 		deploymentOptions = nil
 
 		// add default first
@@ -144,6 +154,19 @@ func (cmd *spec) Spec(fpath string) error {
 		WaitForIP:          false,
 		InjectOvfEnv:       false,
 		PropertyMapping:    cmd.Map(e)}
+
+	if e.VirtualSystem.Annotation != nil {
+		for _, a := range e.VirtualSystem.Annotation {
+			o.Annotation += a.Annotation
+		}
+	}
+
+	if e.Network != nil {
+		for _, net := range e.Network.Networks {
+			o.NetworkMapping = append(o.NetworkMapping, Network{net.Name, ""})
+		}
+	}
+
 	if cmd.verbose {
 		o.AllDeploymentOptions = deploymentOptions
 		o.AllDiskProvisioningOptions = allDiskProvisioningOptions

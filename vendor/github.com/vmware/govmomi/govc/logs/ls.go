@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015-2016 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,12 +17,11 @@ limitations under the License.
 package logs
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
 	"text/tabwriter"
-
-	"golang.org/x/net/context"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
@@ -37,13 +36,27 @@ func init() {
 	cli.Register("logs.ls", &ls{})
 }
 
-func (cmd *ls) Register(f *flag.FlagSet) {}
+func (cmd *ls) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.HostSystemFlag, ctx = flags.NewHostSystemFlag(ctx)
+	cmd.HostSystemFlag.Register(ctx, f)
+}
 
-func (cmd *ls) Process() error { return nil }
+func (cmd *ls) Process(ctx context.Context) error {
+	if err := cmd.HostSystemFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
-func (cmd *ls) Run(f *flag.FlagSet) error {
-	ctx := context.TODO()
+func (cmd *ls) Description() string {
+	return `List diagnostic log keys.
 
+Examples:
+  govc logs.ls
+  govc logs.ls -host host-a`
+}
+
+func (cmd *ls) Run(ctx context.Context, f *flag.FlagSet) error {
 	c, err := cmd.Client()
 	if err != nil {
 		return err
@@ -51,7 +64,7 @@ func (cmd *ls) Run(f *flag.FlagSet) error {
 
 	var host *object.HostSystem
 
-	if c.ServiceContent.About.ApiType == "VirtualCenter" {
+	if c.IsVC() {
 		host, err = cmd.HostSystemIfSpecified()
 		if err != nil {
 			return err

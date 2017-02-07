@@ -18,6 +18,7 @@ package extension
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
@@ -33,7 +34,6 @@ import (
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
-	"golang.org/x/net/context"
 )
 
 type setcert struct {
@@ -49,23 +49,32 @@ func init() {
 	cli.Register("extension.setcert", &setcert{})
 }
 
-func (cmd *setcert) Register(f *flag.FlagSet) {
+func (cmd *setcert) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.ClientFlag, ctx = flags.NewClientFlag(ctx)
+	cmd.ClientFlag.Register(ctx, f)
+
 	f.StringVar(&cmd.cert, "cert-pem", "-", "PEM encoded certificate")
 	f.StringVar(&cmd.org, "org", "VMware", "Organization for generated certificate")
 }
 
-func (cmd *setcert) Process() error { return nil }
+func (cmd *setcert) Process(ctx context.Context) error {
+	if err := cmd.ClientFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *setcert) Usage() string {
 	return "ID"
 }
 
 func (cmd *setcert) Description() string {
-	return `The '-cert-pem' option can be one of the following:
+	return `Set certificate for the extension ID.
+
+The '-cert-pem' option can be one of the following:
 '-' : Read the certificate from stdin
 '+' : Generate a new key pair and save locally to ID.crt and ID.key
-... : Any other value is passed as-is to ExtensionManager.SetCertificate
-`
+... : Any other value is passed as-is to ExtensionManager.SetCertificate`
 }
 
 func (cmd *setcert) create(id string) error {
@@ -129,9 +138,7 @@ func (cmd *setcert) create(id string) error {
 	return nil
 }
 
-func (cmd *setcert) Run(f *flag.FlagSet) error {
-	ctx := context.TODO()
-
+func (cmd *setcert) Run(ctx context.Context, f *flag.FlagSet) error {
 	c, err := cmd.Client()
 	if err != nil {
 		return err

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,29 +17,46 @@ limitations under the License.
 package flags
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"os"
-	"sync"
 
 	"github.com/vmware/govmomi/object"
-	"golang.org/x/net/context"
 )
 
 type VirtualMachineFlag struct {
+	common
+
 	*ClientFlag
 	*DatacenterFlag
 	*SearchFlag
 
-	register sync.Once
-	name     string
-	vm       *object.VirtualMachine
+	name string
+	vm   *object.VirtualMachine
 }
 
-func (flag *VirtualMachineFlag) Register(f *flag.FlagSet) {
-	flag.SearchFlag = NewSearchFlag(SearchVirtualMachines)
+var virtualMachineFlagKey = flagKey("virtualMachine")
 
-	flag.register.Do(func() {
+func NewVirtualMachineFlag(ctx context.Context) (*VirtualMachineFlag, context.Context) {
+	if v := ctx.Value(virtualMachineFlagKey); v != nil {
+		return v.(*VirtualMachineFlag), ctx
+	}
+
+	v := &VirtualMachineFlag{}
+	v.ClientFlag, ctx = NewClientFlag(ctx)
+	v.DatacenterFlag, ctx = NewDatacenterFlag(ctx)
+	v.SearchFlag, ctx = NewSearchFlag(ctx, SearchVirtualMachines)
+	ctx = context.WithValue(ctx, virtualMachineFlagKey, v)
+	return v, ctx
+}
+
+func (flag *VirtualMachineFlag) Register(ctx context.Context, f *flag.FlagSet) {
+	flag.RegisterOnce(func() {
+		flag.ClientFlag.Register(ctx, f)
+		flag.DatacenterFlag.Register(ctx, f)
+		flag.SearchFlag.Register(ctx, f)
+
 		env := "GOVC_VM"
 		value := os.Getenv(env)
 		usage := fmt.Sprintf("Virtual machine [%s]", env)
@@ -47,9 +64,24 @@ func (flag *VirtualMachineFlag) Register(f *flag.FlagSet) {
 	})
 }
 
-func (flag *VirtualMachineFlag) Process() error { return nil }
+func (flag *VirtualMachineFlag) Process(ctx context.Context) error {
+	return flag.ProcessOnce(func() error {
+		if err := flag.ClientFlag.Process(ctx); err != nil {
+			return err
+		}
+		if err := flag.DatacenterFlag.Process(ctx); err != nil {
+			return err
+		}
+		if err := flag.SearchFlag.Process(ctx); err != nil {
+			return err
+		}
+		return nil
+	})
+}
 
 func (flag *VirtualMachineFlag) VirtualMachine() (*object.VirtualMachine, error) {
+	ctx := context.TODO()
+
 	if flag.vm != nil {
 		return flag.vm, nil
 	}
@@ -75,6 +107,6 @@ func (flag *VirtualMachineFlag) VirtualMachine() (*object.VirtualMachine, error)
 		return nil, err
 	}
 
-	flag.vm, err = finder.VirtualMachine(context.TODO(), flag.name)
+	flag.vm, err = finder.VirtualMachine(ctx, flag.name)
 	return flag.vm, err
 }

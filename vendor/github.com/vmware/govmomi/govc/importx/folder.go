@@ -17,10 +17,9 @@ limitations under the License.
 package importx
 
 import (
+	"context"
 	"errors"
 	"flag"
-
-	"golang.org/x/net/context"
 
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
@@ -32,17 +31,30 @@ type FolderFlag struct {
 	folder string
 }
 
-func (flag *FolderFlag) Register(f *flag.FlagSet) {
+func newFolderFlag(ctx context.Context) (*FolderFlag, context.Context) {
+	f := &FolderFlag{}
+	f.DatacenterFlag, ctx = flags.NewDatacenterFlag(ctx)
+	return f, ctx
+}
+
+func (flag *FolderFlag) Register(ctx context.Context, f *flag.FlagSet) {
+	flag.DatacenterFlag.Register(ctx, f)
+
 	f.StringVar(&flag.folder, "folder", "", "Path to folder to add the VM to")
 }
 
+func (flag *FolderFlag) Process(ctx context.Context) error {
+	return flag.DatacenterFlag.Process(ctx)
+}
+
 func (flag *FolderFlag) Folder() (*object.Folder, error) {
+	ctx := context.TODO()
 	if len(flag.folder) == 0 {
 		dc, err := flag.Datacenter()
 		if err != nil {
 			return nil, err
 		}
-		folders, err := dc.Folders(context.TODO())
+		folders, err := dc.Folders(ctx)
 		if err != nil {
 			return nil, err
 		}
@@ -54,7 +66,7 @@ func (flag *FolderFlag) Folder() (*object.Folder, error) {
 		return nil, err
 	}
 
-	mo, err := finder.ManagedObjectList(context.TODO(), flag.folder)
+	mo, err := finder.ManagedObjectList(ctx, flag.folder)
 	if err != nil {
 		return nil, err
 	}

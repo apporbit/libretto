@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ limitations under the License.
 package importx
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"sync"
@@ -27,7 +28,6 @@ import (
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/progress"
 	"github.com/vmware/govmomi/vim25/types"
-	"golang.org/x/net/context"
 )
 
 type ovfFileItem struct {
@@ -116,7 +116,7 @@ func (l *leaseUpdater) run() {
 			// "Completion status represented as an integer in the 0-100 range."
 			// Always report the current value of percent, as it will renew the
 			// lease even if the value hasn't changed or is 0.
-			percent := int(float32(100*atomic.LoadInt64(&l.pos)) / float32(l.total))
+			percent := int32(float32(100*atomic.LoadInt64(&l.pos)) / float32(l.total))
 			err := l.lease.HttpNfcLeaseProgress(context.TODO(), percent)
 			if err != nil {
 				fmt.Printf("from lease updater: %s\n", err)

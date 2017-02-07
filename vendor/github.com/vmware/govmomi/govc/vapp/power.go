@@ -17,13 +17,13 @@ limitations under the License.
 package vapp
 
 import (
+	"context"
 	"flag"
 	"fmt"
 
 	"github.com/vmware/govmomi/govc/cli"
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/object"
-	"golang.org/x/net/context"
 )
 
 type power struct {
@@ -39,8 +39,9 @@ func init() {
 	cli.Register("vapp.power", &power{})
 }
 
-func (cmd *power) Register(f *flag.FlagSet) {
-	cmd.SearchFlag = flags.NewSearchFlag(flags.SearchVirtualApps)
+func (cmd *power) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.SearchFlag, ctx = flags.NewSearchFlag(ctx, flags.SearchVirtualApps)
+	cmd.SearchFlag.Register(ctx, f)
 
 	f.BoolVar(&cmd.On, "on", false, "Power on")
 	f.BoolVar(&cmd.Off, "off", false, "Power off")
@@ -48,7 +49,10 @@ func (cmd *power) Register(f *flag.FlagSet) {
 	f.BoolVar(&cmd.Force, "force", false, "Force (If force is false, the shutdown order in the vApp is executed. If force is true, all virtual machines are powered-off (regardless of shutdown order))")
 }
 
-func (cmd *power) Process() error {
+func (cmd *power) Process(ctx context.Context) error {
+	if err := cmd.SearchFlag.Process(ctx); err != nil {
+		return err
+	}
 	opts := []bool{cmd.On, cmd.Off, cmd.Suspend}
 	selected := false
 
@@ -68,7 +72,7 @@ func (cmd *power) Process() error {
 	return nil
 }
 
-func (cmd *power) Run(f *flag.FlagSet) error {
+func (cmd *power) Run(ctx context.Context, f *flag.FlagSet) error {
 	vapps, err := cmd.VirtualApps(f.Args())
 	if err != nil {
 		return err
@@ -80,13 +84,13 @@ func (cmd *power) Run(f *flag.FlagSet) error {
 		switch {
 		case cmd.On:
 			fmt.Fprintf(cmd, "Powering on %s... ", vapp.Reference())
-			task, err = vapp.PowerOnVApp_Task(context.TODO())
+			task, err = vapp.PowerOn(ctx)
 		case cmd.Off:
 			fmt.Fprintf(cmd, "Powering off %s... ", vapp.Reference())
-			task, err = vapp.PowerOffVApp_Task(context.TODO(), cmd.Force)
+			task, err = vapp.PowerOff(ctx, cmd.Force)
 		case cmd.Suspend:
 			fmt.Fprintf(cmd, "Suspend %s... ", vapp.Reference())
-			task, err = vapp.SuspendVApp_Task(context.TODO())
+			task, err = vapp.Suspend(ctx)
 		}
 
 		if err != nil {
@@ -94,7 +98,7 @@ func (cmd *power) Run(f *flag.FlagSet) error {
 		}
 
 		if task != nil {
-			err = task.Wait(context.TODO())
+			err = task.Wait(ctx)
 		}
 		if err == nil {
 			fmt.Fprintf(cmd, "OK\n")

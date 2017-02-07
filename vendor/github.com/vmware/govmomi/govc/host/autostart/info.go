@@ -17,6 +17,7 @@ limitations under the License.
 package autostart
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
@@ -28,12 +29,12 @@ import (
 	"github.com/vmware/govmomi/govc/flags"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
-	"golang.org/x/net/context"
 )
 
 type info struct {
-	*AutostartFlag
+	cli.Command
 
+	*AutostartFlag
 	*flags.OutputFlag
 }
 
@@ -41,15 +42,28 @@ func init() {
 	cli.Register("host.autostart.info", &info{})
 }
 
-func (cmd *info) Register(f *flag.FlagSet) {}
+func (cmd *info) Register(ctx context.Context, f *flag.FlagSet) {
+	cmd.AutostartFlag, ctx = newAutostartFlag(ctx)
+	cmd.AutostartFlag.Register(ctx, f)
+	cmd.OutputFlag, ctx = flags.NewOutputFlag(ctx)
+	cmd.OutputFlag.Register(ctx, f)
+}
 
-func (cmd *info) Process() error { return nil }
+func (cmd *info) Process(ctx context.Context) error {
+	if err := cmd.AutostartFlag.Process(ctx); err != nil {
+		return err
+	}
+	if err := cmd.OutputFlag.Process(ctx); err != nil {
+		return err
+	}
+	return nil
+}
 
 func (cmd *info) Usage() string {
 	return ""
 }
 
-func (cmd *info) Run(f *flag.FlagSet) error {
+func (cmd *info) Run(ctx context.Context, f *flag.FlagSet) error {
 	client, err := cmd.Client()
 	if err != nil {
 		return err
@@ -74,9 +88,10 @@ func (r *infoResult) MarshalJSON() ([]byte, error) {
 
 // vmPaths resolves the paths for the VMs in the result.
 func (r *infoResult) vmPaths() (map[string]string, error) {
+	ctx := context.TODO()
 	paths := make(map[string]string)
 	for _, info := range r.mhas.Config.PowerInfo {
-		mes, err := mo.Ancestors(context.TODO(), r.client, r.client.ServiceContent.PropertyCollector, info.Key)
+		mes, err := mo.Ancestors(ctx, r.client, r.client.ServiceContent.PropertyCollector, info.Key)
 		if err != nil {
 			return nil, err
 		}
