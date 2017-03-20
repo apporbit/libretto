@@ -469,9 +469,9 @@ func (vm *VM) GetName() string {
 }
 
 // AddDisk to the vm
-func (vm *VM) AddDisk() error {
+func (vm *VM) AddDisk() ([]string, error) {
 	if err := SetupSession(vm); err != nil {
-		return fmt.Errorf("Error setting up vSphere session: %s", err)
+		return nil, fmt.Errorf("Error setting up vSphere session: %s", err)
 	}
 
 	// Cancel the sdk context
@@ -480,13 +480,13 @@ func (vm *VM) AddDisk() error {
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return fmt.Errorf("Failed to retrieve datacenter: %s", err)
+		return nil, fmt.Errorf("Failed to retrieve datacenter: %s", err)
 	}
 
 	// Finds the vm with name vm.Name
 	vmMo, err := findVM(vm, dcMo, vm.Name)
 	if err != nil {
-		return fmt.Errorf("VM not found", vm.Name, err)
+		return nil, fmt.Errorf("VM not found", vm.Name, err)
 	}
 
 	// Gets a random datastore from the list of datastores to create disk
@@ -494,10 +494,11 @@ func (vm *VM) AddDisk() error {
 	vm.datastore = vm.Datastores[n-1]
 
 	// Reconfigures vm with the new Disk
-	if err := reconfigureVM(vm, vmMo); err != nil {
-		return fmt.Errorf("Reconfigure failed : ", err)
+	diskList, err := reconfigureVM(vm, vmMo)
+	if err != nil {
+		return nil, fmt.Errorf("Reconfigure failed : ", err)
 	}
-	return nil
+	return diskList, nil
 }
 
 // RemoveDisk removes the disk attached to the virtualmachine 'vm', vmdkName is the name of the vmdk file for the disk

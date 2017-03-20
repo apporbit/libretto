@@ -22,7 +22,7 @@ type VirtualMachine interface {
 	Halt() error
 	Start() error
 	GetSSH(ssh.Options) (ssh.Client, error)
-	AddDisk() error
+	AddDisk() ([]string, error)
 	RemoveDisk(string) error
 }
 

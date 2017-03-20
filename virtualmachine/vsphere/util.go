@@ -4,8 +4,8 @@ package vsphere
 
 import (
 	"archive/tar"
-	"crypto/tls"
 	"context"
+	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
@@ -429,15 +429,15 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		Datastore: &dsMor,
 	}
 
-        hotAddMemory := true
-        hotAddCpu := true
+	hotAddMemory := true
+	hotAddCpu := true
 
-        config := types.VirtualMachineConfigSpec{
-                NumCPUs:        vm.Flavor.NumCPUs,
-                MemoryMB:       vm.Flavor.MemoryMB,
-                MemoryHotAddEnabled:    &hotAddMemory,
-                CpuHotAddEnabled:       &hotAddCpu,
-        }
+	config := types.VirtualMachineConfigSpec{
+		NumCPUs:             vm.Flavor.NumCPUs,
+		MemoryMB:            vm.Flavor.MemoryMB,
+		MemoryHotAddEnabled: &hotAddMemory,
+		CpuHotAddEnabled:    &hotAddCpu,
+	}
 
 	cisp := types.VirtualMachineCloneSpec{
 		Location: relocateSpec,
@@ -481,7 +481,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		return fmt.Errorf("failed to retrieve cloned VM: %s", err)
 	}
 	if len(vm.Disks) > 0 {
-		if err = reconfigureVM(vm, vmMo); err != nil {
+		if _, err = reconfigureVM(vm, vmMo); err != nil {
 			return err
 		}
 	}
@@ -495,35 +495,67 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	return nil
 }
 
-var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
+// diffDisks : diffDisks takes the devicelists as parameter and returns the
+// file backing info of the disks (devList2 - devList1)
+func diffDisks(devList2, devList1 object.VirtualDeviceList) []string {
+	m := map[int32]int{}
+	disks := make([]string, 0)
+	for _, v := range devList1 {
+		m[v.GetVirtualDevice().Key] = 0
+	}
+
+	for _, v := range devList2 {
+		if _, ok := m[v.GetVirtualDevice().Key]; !ok {
+			vmdkFile := v.GetVirtualDevice().Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
+			disks = append(disks, vmdkFile)
+		}
+	}
+	return disks
+}
+
+//reconfigureVM :reconfigureVM adds the disks to the vm and returns the vmdk
+// file names of the disks added
+var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
 	vmObj := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+
+	devList1, err := vmObj.Device(vm.ctx)
+	if err != nil {
+		return nil, err
+	}
 
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	dsMo, err := findDatastore(vm, dcMo, vm.datastore)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	for _, disk := range vm.Disks {
 		devices, err := vmObj.Device(vm.ctx)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		controller, err := devices.FindDiskController(disk.Controller)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		d := devices.CreateDisk(controller, dsMo.Reference(), "")
 		d.CapacityInKB = disk.Size
 		if err := vmObj.AddDevice(vm.ctx, d); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	return nil
+
+	devList2, err := vmObj.Device(vm.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	disks := diffDisks(devList2, devList1)
+	return disks, nil
 }
 
 var waitForIP = func(vm *VM, vmMo *mo.VirtualMachine) error {
