@@ -26,6 +26,16 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 )
 
+// constants to compare with if the template already exists
+// SKIPTEMPLATE_ERROR     : Errors out
+// SKIPTEMPLATE_OVERWRITE : Overwrites the template and provision the vm
+// SKIPTEMPLATE_USE       : Use the existing template and provision the vm
+const (
+	SKIPTEMPLATE_ERROR = iota
+	SKIPTEMPLATE_OVERWRITE
+	SKIPTEMPLATE_USE
+)
+
 type vmwareFinder struct {
 	finder *find.Finder
 }
@@ -376,8 +386,8 @@ type VM struct {
 	// UseLocalTemplates is a flag to indicate whether a template should be uploaded on all
 	// the datastores that were passed in.
 	UseLocalTemplates bool
-	// SkipExisting when set to `true` lets Provision succeed even if the VM already exists.
-	SkipExisting bool
+	// SkipExisting when set to '2' lets Provision succeed even if the VM already exists.
+	SkipExisting int
 	// Credentials are the credentials to use when connecting to the VM over SSH
 	Credentials ssh.Credentials
 	// Disks is a slice of extra disks to attach to the VM
@@ -431,13 +441,26 @@ func (vm *VM) Provision() (err error) {
 			return fmt.Errorf("failed to check if the template already exists: %s", err)
 		}
 
-		// If it does exist, return an error if the skip existing flag is not set
+		// If it does exist, return an error if the skip existing is set to 0/SKIPTEMPLATE_ERROR
 		if e {
-			if !vm.SkipExisting {
-				return fmt.Errorf("template already exists: %s", vm.Template)
+			switch vm.SkipExisting {
+			case SKIPTEMPLATE_USE: //PASS
+			case SKIPTEMPLATE_ERROR:
+				return fmt.Errorf("Template already exists: %s", vm.Template)
+			case SKIPTEMPLATE_OVERWRITE:
+				fmt.Println("Overwriting Template")
+				if err := DeleteTemplate(vm); err != nil {
+					return err
+				}
+
+				if err := uploadTemplate(vm, dcMo, d); err != nil {
+					return err
+				}
+			default:
+				return fmt.Errorf("Unsupported value for SkipExisting parameter %d", vm.SkipExisting)
 			}
 		} else {
-			// Upload the template if  it does not exist. If it exists and SkipExisting is true,
+			// Upload the template if  it does not exist. If it exists and SkipExisting is '2',
 			// use the existing template
 			if err := uploadTemplate(vm, dcMo, d); err != nil {
 				return err
