@@ -525,7 +525,8 @@ func (vm *VM) AddDisk() ([]string, error) {
 }
 
 // RemoveDisk removes the disk attached to the virtualmachine 'vm', vmdkName is the name of the vmdk file for the disk
-func (vm *VM) RemoveDisk(vmdkName string) (err error) {
+func (vm *VM) RemoveDisk(vmdkFiles []string) error {
+	var errorMessage string
 	if err := SetupSession(vm); err != nil {
 		return fmt.Errorf("Error setting up vSphere session: %s", err)
 	}
@@ -539,33 +540,39 @@ func (vm *VM) RemoveDisk(vmdkName string) (err error) {
 		return fmt.Errorf("Failed to retrieve datacenter: %s", err)
 	}
 
-	// finds the virtualmachine with name vm.Name
-	vmMo, err := findVM(vm, dcMo, vm.Name)
-	if err != nil {
-		return fmt.Errorf("VM not found", vm.Name, err)
-	}
+	for _, vmdkName := range vmdkFiles {
+		// finds the virtualmachine with name vm.Name
+		vmMo, err := findVM(vm, dcMo, vm.Name)
+		if err != nil {
+			return fmt.Errorf("VM not found", vm.Name, err)
+		}
 
-	// find the virtual disk to be removed from the vm
-	var deviceMo *types.VirtualDisk
-	for _, d := range vmMo.Config.Hardware.Device {
-		switch device := d.(type) {
-		case *types.VirtualDisk:
-			fileName := d.GetVirtualDevice().Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
-			if strings.HasSuffix(fileName, vmdkName) {
-				deviceMo = device
-				break
+		// find the virtual disk to be removed from the vm
+		var deviceMo *types.VirtualDisk
+		for _, d := range vmMo.Config.Hardware.Device {
+			switch device := d.(type) {
+			case *types.VirtualDisk:
+				fileName := d.GetVirtualDevice().Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
+				if strings.HasSuffix(fileName, vmdkName) {
+					deviceMo = device
+					break
+				}
 			}
 		}
-	}
 
-	if deviceMo == nil {
-		return fmt.Errorf("No disk with name %s", vmdkName)
-	}
+		if deviceMo == nil {
+			errorMessage += fmt.Sprintf("%s : No disk with name\n", vmdkName)
+			continue
+		}
 
-	// Creates the virtualmachine object to remove the disk
-	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
-	if err = vmo.RemoveDevice(vm.ctx, false, deviceMo); err != nil {
-		fmt.Errorf("Delete disk task returned an error : ", err)
+		// Creates the virtualmachine object to remove the disk
+		vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+		if err = vmo.RemoveDevice(vm.ctx, false, deviceMo); err != nil {
+			errorMessage += fmt.Errorf("%s : Delete disk task returned an error : %s \n", vmdkName, err).Error()
+		}
+	}
+	if errorMessage != "" {
+		return errors.New(errorMessage)
 	}
 	return nil
 }
