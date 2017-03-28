@@ -400,6 +400,84 @@ func searchTree(vm *VM, mor types.ManagedObjectReference, name string) (*mo.Virt
 	return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
 }
 
+// createNetworkDeviceSpec : createNetworkDeviceSpec creates the device spec for the network nwMor
+func addNetworkDeviceSpec(nwMor types.ManagedObjectReference, name string) (*types.VirtualDeviceConfigSpec, error) {
+	// create backing object
+	backing := &types.VirtualEthernetCardNetworkBackingInfo{
+		VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo{
+			DeviceName: name,
+		},
+		Network: &nwMor,
+	}
+	// create ethernet card with the backing info
+	device, err := object.EthernetCardTypes().CreateEthernetCard("e1000", backing)
+	if err != nil {
+		return nil, err
+	}
+	// connect to the network when the nic is connected to vm
+	device.GetVirtualDevice().Connectable = &types.VirtualDeviceConnectInfo{
+		StartConnected:    true,
+		AllowGuestControl: true,
+	}
+	// create spec to add the device to the vm
+	spec := &types.VirtualDeviceConfigSpec{
+		Operation: types.VirtualDeviceConfigSpecOperationAdd,
+		Device:    device,
+	}
+
+	return spec, nil
+}
+
+// reconfigureNetworks : reconfigureNetworks configures the vm and attach it to the
+// networks in the vm structure
+func reconfigureNetworks(vm *VM) ([]types.BaseVirtualDeviceConfigSpec, error) {
+	var deviceSpecs []types.BaseVirtualDeviceConfigSpec
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return nil, err
+	}
+	l, err := getVMLocation(vm, dcMo)
+	if err != nil {
+		return nil, err
+	}
+	// Create mapping of network managed object and network name
+	networkMapping, err := createNetworkMapping(vm, vm.Networks, l.Networks)
+	if err != nil {
+		return nil, err
+	}
+
+	// for all the mappings create a nic and add network backing info to it
+	// create deviceSpec array from  the mapping
+	for _, mapping := range networkMapping {
+		spec, err := addNetworkDeviceSpec(mapping.Network, mapping.Name)
+		if err != nil {
+			return nil, err
+		}
+		// add spec to array of the devices to be added/removed
+		deviceSpecs = append(deviceSpecs, spec)
+	}
+	return deviceSpecs, nil
+}
+
+func removeExistingNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirtualDeviceConfigSpec, error) {
+	devices, err := vmObj.Device(vm.ctx)
+	if err != nil {
+		return nil, err
+	}
+	var removeSpecs []types.BaseVirtualDeviceConfigSpec
+	for _, device := range devices {
+		switch device.(type) {
+		case *types.VirtualE1000, *types.VirtualE1000e, *types.VirtualVmxnet3:
+			spec := &types.VirtualDeviceConfigSpec{
+				Operation: types.VirtualDeviceConfigSpecOperationRemove,
+				Device:    device,
+			}
+			removeSpecs = append(removeSpecs, spec)
+		}
+	}
+	return removeSpecs, nil
+}
+
 var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []string) error {
 	n := util.Random(1, len(usableDatastores))
 	vm.datastore = usableDatastores[n-1]
@@ -429,6 +507,12 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		Datastore: &dsMor,
 	}
 
+	deviceChangeSpec, err := reconfigureNetworks(vm)
+	removeNetworkSpecs, err := removeExistingNetworks(vm, vmObj)
+	if err != nil {
+		return err
+	}
+	deviceChangeSpec = append(deviceChangeSpec, removeNetworkSpecs...)
 	hotAddMemory := true
 	hotAddCpu := true
 
@@ -438,6 +522,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		MemoryHotAddEnabled: &hotAddMemory,
 		CpuHotAddEnabled:    &hotAddCpu,
 	}
+	config.DeviceChange = deviceChangeSpec
 
 	cisp := types.VirtualMachineCloneSpec{
 		Location: relocateSpec,
@@ -758,19 +843,12 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 	if err != nil {
 		return err
 	}
-
-	networkMapping, err := createNetworkMapping(vm, vm.Networks, l.Networks)
-	if err != nil {
-		return err
-	}
-
 	// Create an import spec
 	cisp := types.OvfCreateImportSpecParams{
 		HostSystem:       &l.Host,
 		EntityName:       template,
 		DiskProvisioning: "thin",
 		PropertyMapping:  nil,
-		NetworkMapping:   networkMapping,
 	}
 
 	ovfManager := object.NewOvfManager(vm.client.Client)
