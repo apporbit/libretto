@@ -858,6 +858,11 @@ func GetDcNetworkList(vm *VM) (map[string][]string, error) {
 		// find the networks in selected datacenter
 		allNetworks, err := vm.finder.NetworkList(vm.ctx, "*")
 		if err != nil {
+			switch err.(type) {
+			case *find.NotFoundError:
+				networkList[dc.Name()] = []string{}
+				continue
+			}
 			return nil, err
 		}
 
@@ -867,16 +872,16 @@ func GetDcNetworkList(vm *VM) (map[string][]string, error) {
 		}
 
 		// get the network names
-		var allNetworksMo []mo.Network
-		err = vm.collector.Retrieve(vm.ctx, networksMor, []string{"name"}, &allNetworksMo)
-		if err != nil {
-			return nil, err
-		}
-
-		// generate response for the networks in datacenter. In the response map
-		// the key is the datacenter name and value is the list of images in datacenter
-		for _, network := range allNetworksMo {
-			networkList[dc.Name()] = append(networkList[dc.Name()], network.Name)
+		var network mo.Network
+		for _, networkMor := range networksMor {
+			switch networkMor.Type {
+			case "Network":
+				err = vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &network)
+				if err != nil {
+					return nil, err
+				}
+				networkList[dc.Name()] = append(networkList[dc.Name()], network.Name)
+			}
 		}
 	}
 	return networkList, nil
@@ -903,6 +908,11 @@ func GetDcImageList(vm *VM) (map[string][]string, error) {
 		// find the virtualmachines in selected datacenter
 		allVms, err := vm.finder.VirtualMachineList(vm.ctx, "*")
 		if err != nil {
+			switch err.(type) {
+			case *find.NotFoundError:
+				imageList[dc.Name()] = []string{}
+				continue
+			}
 			return nil, err
 		}
 		var vmsMor []types.ManagedObjectReference
@@ -947,6 +957,11 @@ func GetDcClusterList(vm *VM) (map[string][]string, error) {
 		// find the clusters in selected datacenter
 		allClusters, err := vm.finder.ClusterComputeResourceList(vm.ctx, "*")
 		if err != nil {
+			switch err.(type) {
+			case *find.NotFoundError:
+				dcClusterList[dc.Name()] = []string{}
+				continue
+			}
 			return nil, err
 		}
 		var clustersMor []types.ManagedObjectReference
