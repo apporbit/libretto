@@ -1022,3 +1022,38 @@ func GetDatacenterList(vm *VM) ([]string, error) {
 
 	return dcList, nil
 }
+
+// GetHosts : returns the hosts in a cluster in vcenter server
+func GetHostList(vm *VM) ([]string, error) {
+	var (
+		hostList []string
+		hsMo     mo.HostSystem
+	)
+	// set up session to vcenter server
+	if err := SetupSession(vm); err != nil {
+		return nil, err
+	}
+	// Get datacenter
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return nil, err
+	}
+	// find the Destination cluster
+	crMo, err := findClusterComputeResource(vm, dcMo, vm.Destination.DestinationName)
+	if err != nil {
+		return nil, err
+	}
+	if len(crMo.Host) <= 0 {
+		return nil, errNoHostsInCluster
+	}
+	// get the host list in datacenter vm.Datacenter
+	for _, host := range crMo.Host {
+		err := vm.collector.RetrieveOne(vm.ctx, host, []string{"name"}, &hsMo)
+		if err != nil {
+			return nil, err
+		}
+		hostList = append(hostList, hsMo.Name)
+	}
+
+	return hostList, nil
+}
