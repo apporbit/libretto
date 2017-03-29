@@ -982,3 +982,43 @@ func GetDcClusterList(vm *VM) (map[string][]string, error) {
 	}
 	return dcClusterList, err
 }
+
+// GetDatacenterList : return the list of datacenters in vcenter server
+func GetDatacenterList(vm *VM) ([]string, error) {
+	var (
+		dcList  []string
+		dcMor   []types.ManagedObjectReference
+		allDcMo []mo.Datacenter
+	)
+
+	// set up session to vcenter server
+	if err := SetupSession(vm); err != nil {
+		return nil, err
+	}
+
+	// Get datacenter list in the vcenter server
+	allDcs, err := vm.finder.DatacenterList(vm.ctx, "*")
+	if err != nil {
+		switch err.(type) {
+		case *find.NotFoundError:
+		default:
+			return nil, err
+		}
+	}
+
+	for _, dc := range allDcs {
+		dcMor = append(dcMor, dc.Reference())
+	}
+
+	// get the datacenter names
+	err = vm.collector.Retrieve(vm.ctx, dcMor, []string{"name"}, &allDcMo)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, dc := range allDcMo {
+		dcList = append(dcList, dc.Name)
+	}
+
+	return dcList, nil
+}
