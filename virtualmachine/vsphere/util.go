@@ -30,6 +30,15 @@ import (
 	lvm "github.com/apcera/libretto/virtualmachine"
 )
 
+func StringInSlice(str string, list []string) bool {
+	for _, v := range list {
+		if v == str {
+			return true
+		}
+	}
+	return false
+}
+
 // Exists checks if the VM already exists.
 var Exists = func(vm *VM, dc *mo.Datacenter, tName string) (bool, error) {
 	_, err := findVM(vm, dc, tName)
