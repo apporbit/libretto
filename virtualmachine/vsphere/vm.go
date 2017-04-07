@@ -434,7 +434,12 @@ func (vm *VM) Provision() (err error) {
 
 	usableDatastores := []string{}
 	for _, d := range datastores {
-		template := createTemplateName(vm.Template, d)
+		var template string
+		if vm.UseLocalTemplates {
+			template = createTemplateName(vm.Template, d)
+		} else {
+			template = vm.Template
+		}
 		// Does the VM template already exist?
 		e, err := Exists(vm, dcMo, template)
 		if err != nil {
@@ -792,6 +797,24 @@ func (vm *VM) GetSSH(options ssh.Options) (ssh.Client, error) {
 	return &client, nil
 }
 
+func deleteVM(vm *VM, vmMor *mo.VirtualMachine) error {
+	// create vm object for found vm-template and calls destroy function on the vm
+	vmo := object.NewVirtualMachine(vm.client.Client, vmMor.Reference())
+	task, err := vmo.Destroy(vm.ctx)
+	if err != nil {
+		return err
+	}
+	// wait for the task to complete and checks for the errors if any
+	tInfo, err := task.WaitForResult(vm.ctx, nil)
+	if err != nil {
+		return fmt.Errorf("Error waiting for task : %s", err)
+	}
+	if tInfo.Error != nil {
+		return fmt.Errorf("Destroy task returned error : %s", tInfo.Error)
+	}
+	return nil
+}
+
 // DeleteTemplate deletes the vm-template, created during vm provisioning
 func DeleteTemplate(vm *VM) error {
 	// for the templates that do not exist in server
@@ -804,6 +827,14 @@ func DeleteTemplate(vm *VM) error {
 		return fmt.Errorf("Failed to retrieve datacenter: %s", err)
 	}
 	// find and delete vm-templates from all provided datastores
+	if !vm.UseLocalTemplates {
+		vmMo, err := findVM(vm, dcMo, vm.Template)
+		if err != nil {
+			return err
+		}
+		err = deleteVM(vm, vmMo)
+		return err
+	}
 	for _, datastore := range vm.Datastores {
 		// generate template name <provided-name>-<datastore-name>
 		template := createTemplateName(vm.Template, datastore)
@@ -814,19 +845,9 @@ func DeleteTemplate(vm *VM) error {
 			missingTemplates = append(missingTemplates, template)
 			continue
 		}
-		// create vm object for found vm-template and calls destroy function on the vm
-		vmo := object.NewVirtualMachine(vm.client.Client, templateVm.Reference())
-		task, err := vmo.Destroy(vm.ctx)
+		err = deleteVM(vm, templateVm)
 		if err != nil {
 			return err
-		}
-		// wait for the task to complete and checks for the errors if any
-		tInfo, err := task.WaitForResult(vm.ctx, nil)
-		if err != nil {
-			return fmt.Errorf("Error waiting for task : %s", err)
-		}
-		if tInfo.Error != nil {
-			return fmt.Errorf("Destroy task returned error : %s", tInfo.Error)
 		}
 	}
 	//  If there are any missing templates, return error
