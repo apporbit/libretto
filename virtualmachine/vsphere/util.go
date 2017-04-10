@@ -281,12 +281,12 @@ var createNetworkMapping = func(vm *VM, networks map[string]string, networkMors 
 	}
 
 	var mappings []types.OvfNetworkMapping
-	for network, mapping := range networks {
+	for _, mapping := range networks {
 		mor, ok := nwMap[mapping]
 		if !ok {
 			return nil, NewErrorObjectNotFound(errors.New("Could not find the network mapping"), mapping)
 		}
-		mappings = append(mappings, types.OvfNetworkMapping{Name: network, Network: mor})
+		mappings = append(mappings, types.OvfNetworkMapping{Name: mapping, Network: mor})
 	}
 	return mappings, nil
 }
