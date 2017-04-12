@@ -860,10 +860,10 @@ func DeleteTemplate(vm *VM) error {
 // GetDatastoreInHost : Returns the datastores in a host in a cluster
 func GetDatastoreInHost(vm *VM) ([]map[string]string, error) {
 	var (
-		datastoreList []map[string]string
-		datastore     mo.Datastore
-		hsMo          mo.HostSystem
+		datastore mo.Datastore
+		hsMo      mo.HostSystem
 	)
+	datastoreList := make([]map[string]string, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -910,7 +910,6 @@ func GetDatastoreInHost(vm *VM) ([]map[string]string, error) {
 // GetNetworkInHost : Returns the networks in a host in a cluster
 func GetNetworkInHost(vm *VM) ([]map[string]string, error) {
 	var (
-		networkList    []map[string]string
 		networkMap     map[string]string
 		network        mo.Network
 		portGroup      mo.DistributedVirtualPortgroup
@@ -919,6 +918,7 @@ func GetNetworkInHost(vm *VM) ([]map[string]string, error) {
 		dvSwitch       mo.DistributedVirtualSwitch
 		vmwareDvSwitch mo.VmwareDistributedVirtualSwitch
 	)
+	networkList := make([]map[string]string, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -991,11 +991,11 @@ func GetNetworkInHost(vm *VM) ([]map[string]string, error) {
 // available-filters (map-keys): "hosts", "clusters".
 func GetDcNetworkList(vm *VM, filter map[string][]string) ([]map[string]string, error) {
 	var (
-		networks []map[string]string
 		clusters []string
 		hosts    []string
 	)
 
+	networks := make([]map[string]string, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -1155,11 +1155,11 @@ func GetDcClusterList(vm *VM) ([]map[string]string, error) {
 // GetDatacenterList : return the list of datacenters in vcenter server
 func GetDatacenterList(vm *VM) ([]map[string]string, error) {
 	var (
-		dcList  []map[string]string
 		dcMor   []types.ManagedObjectReference
 		allDcMo []mo.Datacenter
 	)
 
+	dcList := make([]map[string]string, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -1197,9 +1197,9 @@ func GetDatacenterList(vm *VM) ([]map[string]string, error) {
 // GetHosts : returns the hosts in a cluster in vcenter server
 func GetHostList(vm *VM) ([]map[string]string, error) {
 	var (
-		hostList []map[string]string
-		hsMo     mo.HostSystem
+		hsMo mo.HostSystem
 	)
+	hostList := make([]map[string]string, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -1215,7 +1215,7 @@ func GetHostList(vm *VM) ([]map[string]string, error) {
 		return nil, err
 	}
 	if len(crMo.Host) <= 0 {
-		return nil, errNoHostsInCluster
+		return hostList, nil
 	}
 	// get the host list in datacenter vm.Datacenter
 	for _, host := range crMo.Host {
