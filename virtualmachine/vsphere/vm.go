@@ -1230,3 +1230,26 @@ func GetHostList(vm *VM) ([]map[string]string, error) {
 
 	return hostList, nil
 }
+
+// CreateTemplate : uploads a template to vcenter server if doesn't exist
+func CreateTemplate(vm *VM) error {
+	// set up session to vcenter server
+	if err := SetupSession(vm); err != nil {
+		return err
+	}
+	// Get datacenter
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return err
+	}
+
+	_, err = findVM(vm, dcMo, vm.Template)
+	if err == nil {
+		return fmt.Errorf("%s : Template already exists", vm.Template)
+	}
+	//selects a datstore at random and uploads the template
+	n := util.Random(1, len(vm.Datastores))
+	vm.datastore = vm.Datastores[n-1]
+	err = uploadTemplate(vm, dcMo, vm.datastore)
+	return err
+}
