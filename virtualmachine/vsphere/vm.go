@@ -91,12 +91,17 @@ func (v VMwareLease) Complete() error {
 }
 
 type Datastore struct {
-	Name            string `json:"name"`
-	Type            string `json:"type"`
-	Url             string `json:"url"`
-	VirtualCapacity int64  `json:"virtual_capacity"`
-	Capacity        int64  `json:"capacity"`
-	FreeSpace       int64  `json:"free_space"`
+	Name               string `json:"name"`
+	Type               string `json:"type"`
+	Url                string `json:"url"`
+	VirtualCapacity    int64  `json:"virtual_capacity"`
+	Capacity           int64  `json:"capacity"`
+	FreeSpace          int64  `json:"free_space"`
+	Ssd                bool   `json:"ssd"`
+	Local              bool   `json:"local"`
+	ScsiDiskType       string `json:"scsi_disk_type"`
+	MultipleHostAccess bool   `json:"multiple_host_access"`
+	Accessible         bool   `json:"accessible"`
 }
 
 func (ds *Datastore) init(dsMo mo.Datastore) {
@@ -105,9 +110,24 @@ func (ds *Datastore) init(dsMo mo.Datastore) {
 	ds.Url = dsMo.Summary.Url
 	ds.FreeSpace = dsMo.Summary.FreeSpace
 	ds.Capacity = dsMo.Summary.Capacity
+	multiHostAccess := dsMo.Summary.MultipleHostAccess
+	if multiHostAccess != nil {
+		ds.MultipleHostAccess = *multiHostAccess
+	}
+	ds.Accessible = dsMo.Summary.Accessible
 	info := dsMo.Info
 	if info != nil && info.GetDatastoreInfo() != nil {
 		ds.VirtualCapacity = info.GetDatastoreInfo().MaxVirtualDiskCapacity
+		switch t := info.(type) {
+		case *types.VmfsDatastoreInfo:
+			if t.Vmfs.Ssd != nil {
+				ds.Ssd = *t.Vmfs.Ssd
+			}
+			if t.Vmfs.Local != nil {
+				ds.Local = *t.Vmfs.Local
+			}
+			ds.ScsiDiskType = t.Vmfs.ScsiDiskType
+		}
 	}
 }
 
