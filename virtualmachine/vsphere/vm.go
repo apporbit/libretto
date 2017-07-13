@@ -90,6 +90,123 @@ func (v VMwareLease) Complete() error {
 	return v.Lease.HttpNfcLeaseComplete(v.Ctx)
 }
 
+type Datastore struct {
+	Name               string `json:"name"`
+	Type               string `json:"type"`
+	Url                string `json:"url"`
+	VirtualCapacity    int64  `json:"virtual_capacity"`
+	Capacity           int64  `json:"capacity"`
+	FreeSpace          int64  `json:"free_space"`
+	Ssd                bool   `json:"ssd"`
+	Local              bool   `json:"local"`
+	ScsiDiskType       string `json:"scsi_disk_type"`
+	MultipleHostAccess bool   `json:"multiple_host_access"`
+	Accessible         bool   `json:"accessible"`
+}
+
+func (ds *Datastore) init(dsMo mo.Datastore) {
+	ds.Name = dsMo.Name
+	ds.Type = dsMo.Summary.Type
+	ds.Url = dsMo.Summary.Url
+	ds.FreeSpace = dsMo.Summary.FreeSpace
+	ds.Capacity = dsMo.Summary.Capacity
+	multiHostAccess := dsMo.Summary.MultipleHostAccess
+	if multiHostAccess != nil {
+		ds.MultipleHostAccess = *multiHostAccess
+	}
+	ds.Accessible = dsMo.Summary.Accessible
+	info := dsMo.Info
+	if info != nil && info.GetDatastoreInfo() != nil {
+		ds.VirtualCapacity = info.GetDatastoreInfo().MaxVirtualDiskCapacity
+		switch t := info.(type) {
+		case *types.VmfsDatastoreInfo:
+			if t.Vmfs.Ssd != nil {
+				ds.Ssd = *t.Vmfs.Ssd
+			}
+			if t.Vmfs.Local != nil {
+				ds.Local = *t.Vmfs.Local
+			}
+			ds.ScsiDiskType = t.Vmfs.ScsiDiskType
+		}
+	}
+}
+
+type HostSystem struct {
+	Name            string      `json:"name"`
+	CpuModel        string      `json:"cpu_model"`
+	NumCpuPkgs      int16       `json:"num_cpu_pkgs"`
+	NumCpuCores     int16       `json:"num_cpu_cores"`
+	TotalCpu        int32       `json:"total_cpu"`
+	FreeCpu         int32       `json:"free_cpu"`
+	TotalMemory     int64       `json:"total_memory"`
+	FreeMemory      int64       `json:"free_memory"`
+	TotalStorage    int64       `json:"total_storage"`
+	FreeStorage     int64       `json:"free_storage"`
+	VirtualCapacity int64       `json:"virtual_capacity"`
+	Datastores      []Datastore `json:"datastores"`
+}
+
+func (hs *HostSystem) init(hsMo mo.HostSystem, datastores []Datastore) {
+	hs.Name = hsMo.Name
+	hs.Datastores = datastores
+	for _, ds := range hs.Datastores {
+		hs.TotalStorage += ds.Capacity
+		hs.FreeStorage += ds.FreeSpace
+	}
+	hs.VirtualCapacity = hsMo.Runtime.HostMaxVirtualDiskCapacity
+	hs.NumCpuCores = hsMo.Summary.Hardware.NumCpuCores
+	hs.TotalCpu = int32(hs.NumCpuCores) * hsMo.Summary.Hardware.CpuMhz
+	hs.CpuModel = hsMo.Summary.Hardware.CpuModel
+	hs.NumCpuPkgs = hsMo.Summary.Hardware.NumCpuPkgs
+	hs.TotalMemory = hsMo.Summary.Hardware.MemorySize
+
+	// runtime info
+	hs.FreeCpu = int32(hs.TotalCpu) - hsMo.Summary.QuickStats.OverallCpuUsage
+	hs.FreeMemory = hs.TotalMemory - int64(hsMo.Summary.QuickStats.OverallMemoryUsage)*1024*1024
+}
+
+type ClusterComputeResource struct {
+	Name           string       `json:"name"`
+	NumCpuCores    int16        `json:"num_cpu_cores"`
+	NumCpuThreads  int16        `json:"num_cpu_threads"`
+	TotalCpu       int32        `json:"total_cpu"`
+	FreeCpu        int32        `json:"free_cpu"`
+	TotalMemory    int64        `json:"total_memory"`
+	FreeMemory     int64        `json:"free_memory"`
+	TotalStorage   int64        `json:"total_storage"`
+	FreeStorage    int64        `json:"free_storage"`
+	NoOfHosts      int          `json:"number_of_hosts"`
+	NoOfDatastores int          `json:"number_of_datastores"`
+	NoOfNetworks   int          `json:"number_of_networks"`
+	Hosts          []HostSystem `json:"hosts"`
+}
+
+func (cr *ClusterComputeResource) init(crMo mo.ClusterComputeResource, hosts []HostSystem) {
+	cr.Name = crMo.Name
+	cr.Hosts = hosts
+	cr.TotalCpu = crMo.Summary.GetComputeResourceSummary().TotalCpu
+	cr.TotalMemory = crMo.Summary.GetComputeResourceSummary().TotalMemory
+	cr.NumCpuCores = crMo.Summary.GetComputeResourceSummary().NumCpuCores
+	cr.NumCpuThreads = crMo.Summary.GetComputeResourceSummary().NumCpuThreads
+	cr.NoOfHosts = len(crMo.Host)
+	cr.NoOfDatastores = len(crMo.Datastore)
+	cr.NoOfNetworks = len(crMo.Network)
+	m := make(map[string]bool)
+	for _, host := range cr.Hosts {
+		for _, ds := range host.Datastores {
+			_, ok := m[ds.Name]
+			if ok {
+				continue
+			}
+			m[ds.Name] = true
+			cr.TotalStorage += ds.Capacity
+			cr.FreeStorage += ds.FreeSpace
+		}
+		cr.FreeCpu += host.FreeCpu
+		cr.FreeMemory += host.FreeMemory
+	}
+}
+
 // NewProgressReader returns a functional instance of ReadProgress.
 var NewProgressReader = func(r io.Reader, t int64, l Lease) ProgressReader {
 	return ReadProgress{
@@ -858,12 +975,12 @@ func DeleteTemplate(vm *VM) error {
 }
 
 // GetDatastoreInHost : Returns the datastores in a host in a cluster
-func GetDatastoreInHost(vm *VM) ([]map[string]string, error) {
+func GetDatastoreInHost(vm *VM) ([]Datastore, error) {
 	var (
-		datastore mo.Datastore
-		hsMo      mo.HostSystem
+		datastore     mo.Datastore
+		hsMo          mo.HostSystem
+		datastoreList []Datastore
 	)
-	datastoreList := make([]map[string]string, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -894,15 +1011,13 @@ func GetDatastoreInHost(vm *VM) ([]map[string]string, error) {
 
 	// Add all the datastores in host to datastore list
 	for _, datastoreMor := range hsMo.Datastore {
-		err = vm.collector.RetrieveOne(vm.ctx, datastoreMor, []string{"name", "summary"}, &datastore)
+		err = vm.collector.RetrieveOne(vm.ctx, datastoreMor, []string{"name", "summary", "info", "vm"}, &datastore)
 		if err != nil {
 			return nil, err
 		}
-		datastoreList = append(datastoreList, map[string]string{
-			"name":      datastore.Name,
-			"capacity":  fmt.Sprintf("%d", datastore.Summary.Capacity),
-			"freespace": fmt.Sprintf("%d", datastore.Summary.FreeSpace),
-		})
+		ds := Datastore{}
+		ds.init(datastore)
+		datastoreList = append(datastoreList, ds)
 	}
 	return datastoreList, nil
 }
@@ -993,11 +1108,12 @@ func GetDcNetworkList(vm *VM, filter map[string][]string) ([]map[string]string, 
 	var (
 		clusters []string
 		hosts    []string
+		err      error
 	)
 
 	networks := make([]map[string]string, 0)
 	// set up session to vcenter server
-	if err := SetupSession(vm); err != nil {
+	if err = SetupSession(vm); err != nil {
 		return nil, err
 	}
 	clusters, ok := filter["clusters"]
@@ -1023,7 +1139,7 @@ func GetDcNetworkList(vm *VM, filter map[string][]string) ([]map[string]string, 
 		}
 		hostList := make([]string, 0)
 		for _, host := range hostsInCluster {
-			hostList = append(hostList, host["name"])
+			hostList = append(hostList, host.Name)
 		}
 		for _, host := range hosts {
 			if StringInSlice(host, hostList) {
@@ -1107,8 +1223,10 @@ func GetDcImageList(vm *VM) (map[string][]string, error) {
 }
 
 // GetDcClusterList : GetDcClusterList returns the clusters in the datacenter
-func GetDcClusterList(vm *VM) ([]map[string]string, error) {
-	dcClusterList := []map[string]string{}
+func GetDcClusterList(vm *VM) ([]ClusterComputeResource, error) {
+	var (
+		dcClusterList []ClusterComputeResource
+	)
 	// setupSession
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -1138,16 +1256,20 @@ func GetDcClusterList(vm *VM) ([]map[string]string, error) {
 	}
 	// get the cluster names
 	var allClustersMo []mo.ClusterComputeResource
-	err = vm.collector.Retrieve(vm.ctx, clustersMor, []string{"name"}, &allClustersMo)
+	err = vm.collector.Retrieve(vm.ctx, clustersMor, []string{"name", "summary", "host", "datastore", "network"}, &allClustersMo)
 	if err != nil {
 		return nil, err
 	}
 	// generate response for the cluster in datacenter. In the response map
 	// the key is the datacenter name and value is the list of clusters in datacenter
 	for _, cluster := range allClustersMo {
-		dcClusterList = append(dcClusterList, map[string]string{
-			"name": cluster.Name,
-		})
+		cr := ClusterComputeResource{}
+		hosts, err := GetHostList(vm)
+		if err != nil {
+			return nil, err
+		}
+		cr.init(cluster, hosts)
+		dcClusterList = append(dcClusterList, cr)
 	}
 	return dcClusterList, nil
 }
@@ -1194,12 +1316,12 @@ func GetDatacenterList(vm *VM) ([]map[string]string, error) {
 	return dcList, nil
 }
 
-// GetHosts : returns the hosts in a cluster in vcenter server
-func GetHostList(vm *VM) ([]map[string]string, error) {
+// GetHostList : returns the hosts in a cluster in vcenter server
+func GetHostList(vm *VM) ([]HostSystem, error) {
 	var (
-		hsMo mo.HostSystem
+		hsMo     mo.HostSystem
+		hostList []HostSystem
 	)
-	hostList := make([]map[string]string, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -1219,13 +1341,18 @@ func GetHostList(vm *VM) ([]map[string]string, error) {
 	}
 	// get the host list in datacenter vm.Datacenter
 	for _, host := range crMo.Host {
-		err := vm.collector.RetrieveOne(vm.ctx, host, []string{"name"}, &hsMo)
+		err := vm.collector.RetrieveOne(vm.ctx, host, []string{"name", "summary", "runtime"}, &hsMo)
 		if err != nil {
 			return nil, err
 		}
-		hostList = append(hostList, map[string]string{
-			"name": hsMo.Name,
-		})
+		hs := HostSystem{}
+		vm.Destination.HostSystem = hsMo.Name
+		datastores, err := GetDatastoreInHost(vm)
+		if err != nil {
+			return nil, err
+		}
+		hs.init(hsMo, datastores)
+		hostList = append(hostList, hs)
 	}
 
 	return hostList, nil
