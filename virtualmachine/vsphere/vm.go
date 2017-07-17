@@ -1264,6 +1264,10 @@ func GetDcClusterList(vm *VM) ([]ClusterComputeResource, error) {
 	// the key is the datacenter name and value is the list of clusters in datacenter
 	for _, cluster := range allClustersMo {
 		cr := ClusterComputeResource{}
+		vm.Destination = Destination{
+			DestinationType: "cluster",
+			DestinationName: cluster.Name,
+		}
 		hosts, err := GetHostList(vm)
 		if err != nil {
 			return nil, err
