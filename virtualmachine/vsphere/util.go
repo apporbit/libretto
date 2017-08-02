@@ -97,7 +97,7 @@ func GetDatacenter(vm *VM) (*mo.Datacenter, error) {
 	}
 	for _, dc := range dcList {
 		dcMo := mo.Datacenter{}
-		ps := []string{"name", "hostFolder", "vmFolder", "datastore"}
+		ps := []string{"name", "hostFolder", "vmFolder", "datastore", "network"}
 		err := vm.collector.RetrieveOne(vm.ctx, dc.Reference(), ps, &dcMo)
 		if err != nil {
 			return nil, NewErrorPropertyRetrieval(dc.Reference(), ps, err)

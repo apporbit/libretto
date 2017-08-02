@@ -179,6 +179,7 @@ type ClusterComputeResource struct {
 	NoOfDatastores int          `json:"number_datastores"`
 	NoOfNetworks   int          `json:"number_networks"`
 	Hosts          []HostSystem `json:"hosts"`
+	DrsEnabled     bool         `json:"drs_enabled"`
 }
 
 func (cr *ClusterComputeResource) init(crMo mo.ClusterComputeResource, hosts []HostSystem) {
@@ -191,6 +192,7 @@ func (cr *ClusterComputeResource) init(crMo mo.ClusterComputeResource, hosts []H
 	cr.NoOfHosts = len(crMo.Host)
 	cr.NoOfDatastores = len(crMo.Datastore)
 	cr.NoOfNetworks = len(crMo.Network)
+	cr.DrsEnabled = *crMo.Configuration.DrsConfig.Enabled
 	m := make(map[string]bool)
 	for _, host := range cr.Hosts {
 		for _, ds := range host.Datastores {
@@ -983,12 +985,13 @@ func DeleteTemplate(vm *VM) error {
 	return nil
 }
 
-// GetDatastoreInHost : Returns the datastores in a host in a cluster
-func GetDatastoreInHost(vm *VM) ([]Datastore, error) {
+// GetDatastores : Returns the datastores in a host/cluster in a cluster
+func GetDatastores(vm *VM) ([]Datastore, error) {
 	var (
 		datastore     mo.Datastore
 		hsMo          mo.HostSystem
 		datastoreList []Datastore
+		dsMoList      []types.ManagedObjectReference
 	)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
@@ -1007,19 +1010,24 @@ func GetDatastoreInHost(vm *VM) ([]Datastore, error) {
 		return nil, err
 	}
 
-	// find the host in Destination.HostSystem
-	for _, host := range crMo.Host {
-		err = vm.collector.RetrieveOne(vm.ctx, host, []string{"name", "datastore"}, &hsMo)
-		if err != nil {
-			return nil, err
+	if vm.Destination.HostSystem != "" {
+		// find the host in Destination.HostSystem
+		for _, host := range crMo.Host {
+			err = vm.collector.RetrieveOne(vm.ctx, host, []string{"name", "datastore"}, &hsMo)
+			if err != nil {
+				return nil, err
+			}
+			if hsMo.Name == vm.Destination.HostSystem {
+				dsMoList = hsMo.Datastore
+				break
+			}
 		}
-		if hsMo.Name == vm.Destination.HostSystem {
-			break
-		}
+	} else {
+		dsMoList = crMo.Datastore
 	}
 
 	// Add all the datastores in host to datastore list
-	for _, datastoreMor := range hsMo.Datastore {
+	for _, datastoreMor := range dsMoList {
 		err = vm.collector.RetrieveOne(vm.ctx, datastoreMor, []string{"name", "summary", "info", "vm"}, &datastore)
 		if err != nil {
 			return nil, err
@@ -1033,16 +1041,8 @@ func GetDatastoreInHost(vm *VM) ([]Datastore, error) {
 
 // GetNetworkInHost : Returns the networks in a host in a cluster
 func GetNetworkInHost(vm *VM) ([]map[string]string, error) {
-	var (
-		networkMap     map[string]string
-		network        mo.Network
-		portGroup      mo.DistributedVirtualPortgroup
-		opNetwork      mo.OpaqueNetwork
-		hsMo           mo.HostSystem
-		dvSwitch       mo.DistributedVirtualSwitch
-		vmwareDvSwitch mo.VmwareDistributedVirtualSwitch
-	)
-	networkList := make([]map[string]string, 0)
+	var hsMo mo.HostSystem
+
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
@@ -1070,39 +1070,53 @@ func GetNetworkInHost(vm *VM) ([]map[string]string, error) {
 		}
 	}
 
+	return getNetworks(vm, hsMo.Network)
+}
+
+func getNetworks(vm *VM, networkMo []types.ManagedObjectReference) ([]map[string]string, error) {
+	var (
+		networkMap     map[string]string
+		network        mo.Network
+		portGroup      mo.DistributedVirtualPortgroup
+		opNetwork      mo.OpaqueNetwork
+		dvSwitch       mo.DistributedVirtualSwitch
+		vmwareDvSwitch mo.VmwareDistributedVirtualSwitch
+	)
+	networkList := make([]map[string]string, 0)
+
 	// Add all the networks in host to network list
-	for _, networkMor := range hsMo.Network {
+	for _, networkMor := range networkMo {
 		switch networkMor.Type {
 		case "Network":
-			err = vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &network)
+			err := vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &network)
 			if err != nil {
 				return nil, err
 			}
-			networkMap = map[string]string{"name": network.Name}
+			networkMap = map[string]string{"name": network.Name, "id": network.Self.Value}
 		case "DistributedVirtualPortgroup":
-			err = vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &portGroup)
+			err := vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &portGroup)
 			if err != nil {
 				return nil, err
 			}
-			networkMap = map[string]string{"name": portGroup.Name}
+			networkMap = map[string]string{"name": portGroup.Name, "id": network.Self.Value}
 		case "OpaqueNetwork":
-			err = vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &opNetwork)
+			err := vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &opNetwork)
 			if err != nil {
 				return nil, err
 			}
-			networkMap = map[string]string{"name": opNetwork.Name}
+			networkMap = map[string]string{"name": opNetwork.Name, "id": network.Self.Value}
 		case "DistributedVirtualSwitch":
-			err = vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &dvSwitch)
+			err := vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &dvSwitch)
 			if err != nil {
 				return nil, err
 			}
-			networkMap = map[string]string{"name": dvSwitch.Name}
+			networkMap = map[string]string{"name": dvSwitch.Name, "id": network.Self.Value}
 		case "VmwareDistributedVirtualSwitch":
-			err = vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &vmwareDvSwitch)
+			err := vm.collector.RetrieveOne(vm.ctx, networkMor, []string{"name"}, &vmwareDvSwitch)
 			if err != nil {
 				return nil, err
 			}
-			networkMap = map[string]string{"name": vmwareDvSwitch.Name}
+			networkMap = map[string]string{"name": vmwareDvSwitch.Name, "id": network.Self.Value}
 		default:
 			return nil, fmt.Errorf("Unknown network type : %s", networkMor.Type)
 		}
@@ -1114,22 +1128,42 @@ func GetNetworkInHost(vm *VM) ([]map[string]string, error) {
 // GetDcNetworkList : returns a list of network in given datacenter
 // available-filters (map-keys): "hosts", "clusters".
 func GetDcNetworkList(vm *VM, filter map[string][]string) ([]map[string]string, error) {
+	filterExists := true
+
+	// set up session to vcenter server
+	if err := SetupSession(vm); err != nil {
+		return nil, err
+	}
+
+	clusters, ok := filter["clusters"]
+	if !ok {
+		filterExists = false
+	}
+	if !filterExists || len(clusters) == 0 {
+		// get datacenter in the vcenter server
+		dcMo, err := GetDatacenter(vm)
+		if err != nil {
+			return nil, err
+		}
+		return getNetworks(vm, dcMo.Network)
+	}
+	return GetClusterNetworkList(vm, filter)
+}
+
+// GetClusterNetworkList : returns a list of network in given cluster/host
+// available-filters (map-keys): "hosts", "clusters".
+func GetClusterNetworkList(vm *VM, filter map[string][]string) ([]map[string]string, error) {
 	var (
 		clusters []string
 		hosts    []string
-		err      error
 	)
 
 	networks := make([]map[string]string, 0)
-	// set up session to vcenter server
-	if err = SetupSession(vm); err != nil {
-		return nil, err
-	}
+
 	clusters, ok := filter["clusters"]
 	if !ok {
 		return nil, errors.New("Key 'clusters' is missing")
 	}
-
 	hosts, ok = filter["hosts"]
 	if !ok {
 		return nil, errors.New("Key 'hosts' is missing")
@@ -1323,6 +1357,7 @@ func GetDatacenterList(vm *VM) ([]map[string]string, error) {
 	for _, dc := range allDcMo {
 		dcList = append(dcList, map[string]string{
 			"name": dc.Name,
+			"id": dc.Self.Value,
 		})
 	}
 
@@ -1360,7 +1395,7 @@ func GetHostList(vm *VM) ([]HostSystem, error) {
 		}
 		hs := HostSystem{}
 		vm.Destination.HostSystem = hsMo.Name
-		datastores, err := GetDatastoreInHost(vm)
+		datastores, err := GetDatastores(vm)
 		if err != nil {
 			return nil, err
 		}
@@ -1392,4 +1427,63 @@ func CreateTemplate(vm *VM) error {
 	vm.datastore = vm.Datastores[n-1]
 	err = uploadTemplate(vm, dcMo, vm.datastore)
 	return err
+}
+
+// GetDatastores : Returns the datastores in a host/cluster in a cluster
+func GetTemplateList(vm *VM) ([]map[string]string, error) {
+	vmMoList, err := getVirtualMachines(vm)
+	if err != nil {
+		return nil, err
+	}
+
+	vmList := make([]map[string]string, 0)
+	for _, vmo := range vmMoList {
+		// Filter out the templates
+		if vmo.Config.Template {
+			vmList = append(vmList, map[string]string{
+				"name": vmo.Name,
+				"id":   vmo.Self.Value,
+			})
+		}
+	}
+	return vmList, nil
+}
+
+// GetVirtualMachines : Return the virual machines in a cluster
+func getVirtualMachines(vm *VM) ([]mo.VirtualMachine, error) {
+	var (
+		vmList			[]mo.VirtualMachine
+		virtualMachines	[]mo.VirtualMachine
+		hsMo          	mo.HostSystem
+	)
+	// set up session to vcenter server
+	if err := SetupSession(vm); err != nil {
+		return nil, err
+	}
+
+	// set up session to vcenter server
+	dc, err := GetDatacenter(vm)
+	if err != nil {
+		return nil, err
+	}
+
+	// Get the cluster resource and its host, datastore and datastore
+	crMo, err := findClusterComputeResource(vm, dc, vm.Destination.DestinationName)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, host := range crMo.Host {
+		err = vm.collector.RetrieveOne(vm.ctx, host, []string{"name", "vm"}, &hsMo)
+		if err != nil {
+			return nil, err
+		}
+
+		err = vm.collector.Retrieve(vm.ctx, hsMo.Vm, []string{"name", "config"}, &virtualMachines)
+		if err != nil {
+			return nil, err
+		}
+		vmList = append(vmList, virtualMachines...)
+	}
+	return vmList, nil
 }
