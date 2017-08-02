@@ -729,6 +729,31 @@ var start = func(vm *VM) error {
 	return nil
 }
 
+var reset = func(vm *VM) error {
+	// Get a reference to the datacenter with host and vm folders populated
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return err
+	}
+	vmMo, err := findVM(vm, dcMo, vm.Name)
+	if err != nil {
+		return err
+	}
+	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+	resetTask, err := vmo.Reset(vm.ctx)
+	if err != nil {
+		return fmt.Errorf("error creating a reset task on the vm: %v", err)
+	}
+	tInfo, err := resetTask.WaitForResult(vm.ctx, nil)
+	if err != nil {
+		return fmt.Errorf("error waiting for reset task: %v", err)
+	}
+	if tInfo.Error != nil {
+		return fmt.Errorf("reset task returned an error: %v", err)
+	}
+	return nil
+}
+
 var filterHosts = func(vm *VM, hosts []types.ManagedObjectReference) ([]types.ManagedObjectReference, error) {
 	filteredHosts := []types.ManagedObjectReference{}
 	for _, host := range hosts {

@@ -175,9 +175,9 @@ type ClusterComputeResource struct {
 	FreeMemory     int64        `json:"free_memory"`
 	TotalStorage   int64        `json:"total_storage"`
 	FreeStorage    int64        `json:"free_storage"`
-	NoOfHosts      int          `json:"number_of_hosts"`
-	NoOfDatastores int          `json:"number_of_datastores"`
-	NoOfNetworks   int          `json:"number_of_networks"`
+	NoOfHosts      int          `json:"number_hosts"`
+	NoOfDatastores int          `json:"number_datastores"`
+	NoOfNetworks   int          `json:"number_networks"`
 	Hosts          []HostSystem `json:"hosts"`
 }
 
@@ -896,6 +896,15 @@ func (vm *VM) Start() (err error) {
 	}
 	defer vm.cancel()
 	return start(vm)
+}
+
+// Reset restarts this VM.
+func (vm *VM) Reset() (err error) {
+	if err := SetupSession(vm); err != nil {
+		return err
+	}
+	defer vm.cancel()
+	return reset(vm)
 }
 
 // Resume resumes this VM from a suspended or powered off state.
