@@ -1299,7 +1299,7 @@ func GetDcClusterList(vm *VM) ([]ClusterComputeResource, error) {
 	}
 	// get the cluster names
 	var allClustersMo []mo.ClusterComputeResource
-	err = vm.collector.Retrieve(vm.ctx, clustersMor, []string{"name", "summary", "host", "datastore", "network"}, &allClustersMo)
+	err = vm.collector.Retrieve(vm.ctx, clustersMor, []string{"name", "summary", "configuration", "host", "datastore", "network"}, &allClustersMo)
 	if err != nil {
 		return nil, err
 	}
