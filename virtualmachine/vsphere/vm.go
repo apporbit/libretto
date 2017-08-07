@@ -1128,17 +1128,12 @@ func getNetworks(vm *VM, networkMo []types.ManagedObjectReference) ([]map[string
 // GetDcNetworkList : returns a list of network in given datacenter
 // available-filters (map-keys): "hosts", "clusters".
 func GetDcNetworkList(vm *VM, filter map[string][]string) ([]map[string]string, error) {
-	filterExists := true
-
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
 	}
 
-	clusters, ok := filter["clusters"]
-	if !ok {
-		filterExists = false
-	}
+	clusters, filterExists := filter["clusters"]
 	if !filterExists || len(clusters) == 0 {
 		// get datacenter in the vcenter server
 		dcMo, err := GetDatacenter(vm)
@@ -1357,7 +1352,7 @@ func GetDatacenterList(vm *VM) ([]map[string]string, error) {
 	for _, dc := range allDcMo {
 		dcList = append(dcList, map[string]string{
 			"name": dc.Name,
-			"id": dc.Self.Value,
+			"id":   dc.Self.Value,
 		})
 	}
 
@@ -1429,7 +1424,7 @@ func CreateTemplate(vm *VM) error {
 	return err
 }
 
-// GetDatastores : Returns the datastores in a host/cluster in a cluster
+// GetTemplateList : Returns the template VMs in a cluster
 func GetTemplateList(vm *VM) ([]map[string]string, error) {
 	vmMoList, err := getVirtualMachines(vm)
 	if err != nil {
@@ -1452,9 +1447,9 @@ func GetTemplateList(vm *VM) ([]map[string]string, error) {
 // GetVirtualMachines : Return the virual machines in a cluster
 func getVirtualMachines(vm *VM) ([]mo.VirtualMachine, error) {
 	var (
-		vmList			[]mo.VirtualMachine
-		virtualMachines	[]mo.VirtualMachine
-		hsMo          	mo.HostSystem
+		vmList          []mo.VirtualMachine
+		virtualMachines []mo.VirtualMachine
+		hsMo            mo.HostSystem
 	)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
