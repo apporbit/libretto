@@ -700,7 +700,7 @@ func (vm *VM) RemoveDisk(vmdkFiles []string) error {
 	return nil
 }
 
-// GetIPs returns the IPs and ref. Id of this VM. Returns all the IPs known to the API for
+// GetIPsAndId returns the IPs and reference Id of this VM. Returns all the IPs known to the API for
 // the different network cards for this VM. Includes IPV4 and IPV6 addresses.
 func (vm *VM) GetIPsAndId() ([]net.IP, string, error) {
 	if err := SetupSession(vm); err != nil {
