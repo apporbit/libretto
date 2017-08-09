@@ -700,22 +700,22 @@ func (vm *VM) RemoveDisk(vmdkFiles []string) error {
 	return nil
 }
 
-// GetIPs returns the IPs of this VM. Returns all the IPs known to the API for
+// GetIPs returns the IPs and ref. Id of this VM. Returns all the IPs known to the API for
 // the different network cards for this VM. Includes IPV4 and IPV6 addresses.
-func (vm *VM) GetIPs() ([]net.IP, error) {
+func (vm *VM) GetIPs() ([]net.IP, string, error) {
 	if err := SetupSession(vm); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	defer vm.cancel()
 
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	vmMo, err := findVM(vm, dcMo, vm.Name)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	// Lazy initialized when there is an IP address later.
 	var ips []net.IP
@@ -737,7 +737,7 @@ func (vm *VM) GetIPs() ([]net.IP, error) {
 			ips = append(ips, ip)
 		}
 	}
-	return ips, nil
+	return ips, vmMo.Self.Value, nil
 }
 
 // Destroy deletes this VM from vSphere.
