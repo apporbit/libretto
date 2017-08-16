@@ -524,6 +524,8 @@ type VM struct {
 	// UseLinkedClones is a flag to indicate whether VMs cloned from templates should be
 	// linked clones.
 	UseLinkedClones bool
+	// Skip waiting for IP to be assigned to VM in create/start actions
+	SkipIPWait bool
 	uri             *url.URL
 	ctx             context.Context
 	cancel          context.CancelFunc

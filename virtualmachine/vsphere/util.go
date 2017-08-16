@@ -588,8 +588,10 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	if err = start(vm); err != nil {
 		return err
 	}
-	if err = waitForIP(vm, vmMo); err != nil {
-		return err
+	if !vm.SkipIPWait {
+		if err = waitForIP(vm, vmMo); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -723,8 +725,10 @@ var start = func(vm *VM) error {
 	if tInfo.Error != nil {
 		return fmt.Errorf("poweron task returned an error: %s", err)
 	}
-	if err = waitForIP(vm, vmMo); err != nil {
-		return err
+	if !vm.SkipIPWait {
+		if err = waitForIP(vm, vmMo); err != nil {
+			return err
+		}
 	}
 	return nil
 }
