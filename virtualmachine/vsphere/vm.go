@@ -48,10 +48,6 @@ func (v vmwareFinder) DatacenterList(c context.Context, p string) ([]*object.Dat
 	return v.finder.DatacenterList(c, p)
 }
 
-func (v vmwareFinder) Datacenter(c context.Context, p string) (*object.Datacenter, error) {
-	return v.finder.Datacenter(c, p)
-}
-
 func (v vmwareFinder) VirtualMachineList(c context.Context, p string) ([]*object.VirtualMachine, error) {
 	return v.finder.VirtualMachineList(c, p)
 }
@@ -423,7 +419,6 @@ type snapshot struct {
 
 type finder interface {
 	DatacenterList(context.Context, string) ([]*object.Datacenter, error)
-	Datacenter(context.Context, string) (*object.Datacenter, error)
 	ClusterComputeResourceList(context.Context, string) ([]*object.ClusterComputeResource, error)
 	VirtualMachineList(context.Context, string) ([]*object.VirtualMachine, error)
 	NetworkList(context.Context, string) ([]object.NetworkReference, error)
@@ -1251,7 +1246,7 @@ func GetDcImageList(vm *VM) (map[string][]string, error) {
 		// generate response for the images in datacenter. In the response map
 		// the key is the datacenter name and value is the list of images in datacenter
 		for _, vmMo := range allVmsMo {
-			if vmMo.Config.Template {
+			if vmMo.Config != nil && vmMo.Config.Template {
 				imageList[dc.Name()] = append(imageList[dc.Name()], vmMo.Name)
 			}
 		}
@@ -1458,7 +1453,7 @@ func GetTemplateList(vm *VM) ([]map[string]string, error) {
 	if vmMoList != nil {
 		for _, vmo := range vmMoList {
 			// Filter out the templates
-			if vmo.Config.Template {
+			if vmo.Config != nil && vmo.Config.Template {
 				vmList = append(vmList, map[string]string{
 					"name": vmo.Name,
 					"id":   vmo.Self.Value,
@@ -1482,12 +1477,13 @@ func getVirtualMachines(vm *VM) ([]mo.VirtualMachine, error) {
 	}
 
 	if vm.Destination.DestinationName == "" {
-		// Return templates for the whole datacenter
-		dcObj, err := vm.finder.Datacenter(vm.ctx, vm.Datacenter)
+		// Return virtual machines for the whole datacenter
+		dcMo, err := GetDatacenter(vm)
 		if err != nil {
 			return nil, err
 		}
 
+		dcObj := object.NewDatacenter(vm.client.Client, dcMo.Reference())
 		return getDcVMList(vm, dcObj)
 	}
 
