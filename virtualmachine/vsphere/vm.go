@@ -1469,7 +1469,7 @@ func GetTemplateList(vm *VM) ([]map[string]string, error) {
 	return vmList, nil
 }
 
-// GetVirtualMachines : Return the virtual machines in a cluster
+// getVirtualMachines : Return the virtual machines in a cluster
 func getVirtualMachines(vm *VM) ([]mo.VirtualMachine, error) {
 	var (
 		vmList          []mo.VirtualMachine
