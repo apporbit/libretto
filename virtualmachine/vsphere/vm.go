@@ -900,6 +900,24 @@ func (vm *VM) Halt() (err error) {
 	return halt(vm)
 }
 
+// ShutDown Initiates guest shut down of this VM.
+func (vm *VM) ShutDown() (err error) {
+	if err := SetupSession(vm); err != nil {
+		return err
+	}
+	defer vm.cancel()
+	return shutDown(vm)
+}
+
+// Restart Initiates guest reboot of this VM.
+func (vm *VM) Restart() (err error) {
+	if err := SetupSession(vm); err != nil {
+		return err
+	}
+	defer vm.cancel()
+	return restart(vm)
+}
+
 // Start powers on this VM.
 func (vm *VM) Start() (err error) {
 	if err := SetupSession(vm); err != nil {
@@ -1443,8 +1461,8 @@ func CreateTemplate(vm *VM) error {
 }
 
 // GetTemplateList : Returns the template VMs in a cluster
-func GetTemplateList(vm *VM) ([]map[string]string, error) {
-	vmList := make([]map[string]string, 0)
+func GetTemplateList(vm *VM) ([]map[string]interface{}, error) {
+	vmList := make([]map[string]interface{}, 0)
 	vmMoList, err := getVirtualMachines(vm)
 	if err != nil {
 		return nil, err
@@ -1454,9 +1472,23 @@ func GetTemplateList(vm *VM) ([]map[string]string, error) {
 		for _, vmo := range vmMoList {
 			// Filter out the templates
 			if vmo.Config != nil && vmo.Config.Template {
-				vmList = append(vmList, map[string]string{
-					"name": vmo.Name,
-					"id":   vmo.Self.Value,
+				devices := vmo.Config.Hardware.Device
+				diskInfo := make([]map[string]interface{}, 0)
+				for _, device := range devices {
+					if disk, ok := device.(*types.VirtualDisk); ok {
+						devinfo := disk.DeviceInfo
+						if di, ok := devinfo.(*types.Description); ok {
+							diskInfo = append(diskInfo, map[string]interface{}{
+								"name": di.Label,
+								"size": disk.CapacityInKB,
+							})
+						}
+					}
+				}
+				vmList = append(vmList, map[string]interface{}{
+					"name":  vmo.Name,
+					"id":    vmo.Self.Value,
+					"disks": diskInfo,
 				})
 			}
 		}

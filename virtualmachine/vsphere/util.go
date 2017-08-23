@@ -699,6 +699,44 @@ var halt = func(vm *VM) error {
 	return nil
 }
 
+// shutDown Initiates guest shut down of this VM.
+var shutDown = func(vm *VM) error {
+	// Get a reference to the datacenter with host and vm folders populated
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return err
+	}
+	vmMo, err := findVM(vm, dcMo, vm.Name)
+	if err != nil {
+		return err
+	}
+	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+	err = vmo.ShutdownGuest(vm.ctx)
+	if err != nil {
+		return fmt.Errorf("error initiating shutDown on the vm: %s", err)
+	}
+	return nil
+}
+
+// restart Initiates guest reboot of this VM.
+var restart = func(vm *VM) error {
+	// Get a reference to the datacenter with host and vm folders populated
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return err
+	}
+	vmMo, err := findVM(vm, dcMo, vm.Name)
+	if err != nil {
+		return err
+	}
+	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+	err = vmo.RebootGuest(vm.ctx)
+	if err != nil {
+		return fmt.Errorf("error initiating reboot on the vm: %s", err)
+	}
+	return nil
+}
+
 var start = func(vm *VM) error {
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
