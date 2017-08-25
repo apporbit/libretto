@@ -1475,14 +1475,16 @@ func GetTemplateList(vm *VM) ([]map[string]interface{}, error) {
 				devices := vmo.Config.Hardware.Device
 				diskInfo := make([]map[string]interface{}, 0)
 				for _, device := range devices {
-					if disk, ok := device.(*types.VirtualDisk); ok {
-						devinfo := disk.DeviceInfo
-						if di, ok := devinfo.(*types.Description); ok {
-							diskInfo = append(diskInfo, map[string]interface{}{
-								"name": di.Label,
-								"size": disk.CapacityInKB,
-							})
-						}
+					disk, ok := device.(*types.VirtualDisk)
+					if !ok {
+						continue
+					}
+					devinfo := disk.DeviceInfo
+					if di, ok := devinfo.(*types.Description); ok {
+						diskInfo = append(diskInfo, map[string]interface{}{
+							"name": di.Label,
+							"size": disk.CapacityInKB,
+						})
 					}
 				}
 				vmList = append(vmList, map[string]interface{}{
