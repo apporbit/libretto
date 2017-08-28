@@ -266,7 +266,7 @@ var findHostSystem = func(vm *VM, hsMors []types.ManagedObjectReference, name st
 
 var findMob func(*VM, types.ManagedObjectReference, string) (*types.ManagedObjectReference, error)
 
-var createNetworkMapping = func(vm *VM, networks map[string]string, networkMors []types.ManagedObjectReference) ([]types.OvfNetworkMapping, error) {
+var createNetworkMapping = func(vm *VM, networks []map[string]string, networkMors []types.ManagedObjectReference) ([]types.OvfNetworkMapping, error) {
 	nwMap := map[string]types.ManagedObjectReference{}
 	// Create a map between network name and mor for lookup
 	for _, network := range networkMors {
@@ -282,11 +282,12 @@ var createNetworkMapping = func(vm *VM, networks map[string]string, networkMors 
 
 	var mappings []types.OvfNetworkMapping
 	for _, mapping := range networks {
-		mor, ok := nwMap[mapping]
+		nwName := mapping["name"]
+		mor, ok := nwMap[nwName]
 		if !ok {
-			return nil, NewErrorObjectNotFound(errors.New("Could not find the network mapping"), mapping)
+			return nil, NewErrorObjectNotFound(errors.New("Could not find the network mapping"), nwName)
 		}
-		mappings = append(mappings, types.OvfNetworkMapping{Name: mapping, Network: mor})
+		mappings = append(mappings, types.OvfNetworkMapping{Name: nwName, Network: mor})
 	}
 	return mappings, nil
 }
@@ -419,7 +420,7 @@ func addNetworkDeviceSpec(nwMor types.ManagedObjectReference, name string) (*typ
 		Network: &nwMor,
 	}
 	// create ethernet card with the backing info
-	device, err := object.EthernetCardTypes().CreateEthernetCard("e1000", backing)
+	device, err := object.EthernetCardTypes().CreateEthernetCard("vmxnet3", backing)
 	if err != nil {
 		return nil, err
 	}
@@ -439,12 +440,14 @@ func addNetworkDeviceSpec(nwMor types.ManagedObjectReference, name string) (*typ
 
 // reconfigureNetworks : reconfigureNetworks configures the vm and attach it to the
 // networks in the vm structure
-func reconfigureNetworks(vm *VM) ([]types.BaseVirtualDeviceConfigSpec, error) {
+func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirtualDeviceConfigSpec, error) {
 	var deviceSpecs []types.BaseVirtualDeviceConfigSpec
+	var nw map[string]string
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
 		return nil, err
 	}
+
 	l, err := getVMLocation(vm, dcMo)
 	if err != nil {
 		return nil, err
@@ -455,15 +458,61 @@ func reconfigureNetworks(vm *VM) ([]types.BaseVirtualDeviceConfigSpec, error) {
 		return nil, err
 	}
 
-	// for all the mappings create a nic and add network backing info to it
-	// create deviceSpec array from  the mapping
-	for _, mapping := range networkMapping {
-		spec, err := addNetworkDeviceSpec(mapping.Network, mapping.Name)
-		if err != nil {
-			return nil, err
+	devices, err := vmObj.Device(vm.ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	// Modify existing networks in template with provided networks list
+	for _, device := range devices {
+		switch device.(type) {
+		case *types.VirtualE1000, *types.VirtualE1000e, *types.VirtualVmxnet3:
+			if len(vm.Networks) == 0 {
+				// Remove extra networks
+				spec := &types.VirtualDeviceConfigSpec{
+					Operation: types.VirtualDeviceConfigSpecOperationRemove,
+					Device:    device,
+				}
+				deviceSpecs = append(deviceSpecs, spec)
+				continue
+			}
+
+			// Edit device
+			nw, vm.Networks = vm.Networks[0], vm.Networks[1:]
+			for _, nwMappingObj := range networkMapping {
+				if nwMappingObj.Name == nw["name"] {
+					device.GetVirtualDevice().Backing = &types.VirtualEthernetCardNetworkBackingInfo {
+						VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo {
+							DeviceName: nwMappingObj.Name,
+						},
+						Network: &nwMappingObj.Network,
+					}
+					spec := &types.VirtualDeviceConfigSpec{
+						Operation: types.VirtualDeviceConfigSpecOperationEdit,
+						Device:    device,
+					}
+					deviceSpecs = append(deviceSpecs, spec)
+					break
+				}
+			}
+		default:
+			continue
 		}
-		// add spec to array of the devices to be added/removed
-		deviceSpecs = append(deviceSpecs, spec)
+	}
+
+	// Add extra networks if any
+	for _, nw = range vm.Networks {
+		for _, mapping := range networkMapping {
+			if mapping.Name == nw["name"] {
+				spec, err := addNetworkDeviceSpec(mapping.Network, mapping.Name)
+				if err != nil {
+					return nil, err
+				}
+				// add spec to array of the devices to be added/removed
+				deviceSpecs = append(deviceSpecs, spec)
+				break
+			}
+		}
 	}
 	return deviceSpecs, nil
 }
@@ -521,12 +570,10 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		Datastore: &dsMor,
 	}
 
-	deviceChangeSpec, err := reconfigureNetworks(vm)
-	removeNetworkSpecs, err := removeExistingNetworks(vm, vmObj)
+	deviceChangeSpec, err := reconfigureNetworks(vm, vmObj)
 	if err != nil {
 		return err
 	}
-	deviceChangeSpec = append(deviceChangeSpec, removeNetworkSpecs...)
 	hotAddMemory := true
 	hotAddCpu := true
 
@@ -1048,7 +1095,7 @@ func validateHost(vm *VM, hsMor types.ManagedObjectReference) (bool, error) {
 		hostNetworks[name] = struct{}{}
 	}
 	for _, v := range vm.Networks {
-		if _, ok := hostNetworks[v]; !ok {
+		if _, ok := hostNetworks[v["name"]]; !ok {
 			nwValid = false
 			break
 		}
