@@ -463,11 +463,12 @@ func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirt
 		return nil, err
 	}
 
+	idx := 0
 	// Modify existing networks in template with provided networks list
 	for _, device := range devices {
 		switch device.(type) {
 		case *types.VirtualE1000, *types.VirtualE1000e, *types.VirtualVmxnet3:
-			if len(vm.Networks) == 0 {
+			if idx >= len(vm.Networks) {
 				// Remove extra networks
 				spec := &types.VirtualDeviceConfigSpec{
 					Operation: types.VirtualDeviceConfigSpecOperationRemove,
@@ -478,7 +479,7 @@ func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirt
 			}
 
 			// Edit device
-			nw, vm.Networks = vm.Networks[0], vm.Networks[1:]
+			nw = vm.Networks[idx]
 			for _, nwMappingObj := range networkMapping {
 				if nwMappingObj.Name == nw["name"] {
 					device.GetVirtualDevice().Backing = &types.VirtualEthernetCardNetworkBackingInfo {
@@ -495,13 +496,12 @@ func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirt
 					break
 				}
 			}
-		default:
-			continue
+			idx++
 		}
 	}
 
 	// Add extra networks if any
-	for _, nw = range vm.Networks {
+	for _, nw = range vm.Networks[idx:] {
 		for _, mapping := range networkMapping {
 			if mapping.Name == nw["name"] {
 				spec, err := addNetworkDeviceSpec(mapping.Network, mapping.Name)
