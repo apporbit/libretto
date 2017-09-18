@@ -482,8 +482,8 @@ func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirt
 			nw = vm.Networks[idx]
 			for _, nwMappingObj := range networkMapping {
 				if nwMappingObj.Name == nw["name"] {
-					device.GetVirtualDevice().Backing = &types.VirtualEthernetCardNetworkBackingInfo {
-						VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo {
+					device.GetVirtualDevice().Backing = &types.VirtualEthernetCardNetworkBackingInfo{
+						VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo{
 							DeviceName: nwMappingObj.Name,
 						},
 						Network: &nwMappingObj.Network,
@@ -576,6 +576,14 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	}
 	hotAddMemory := true
 	hotAddCpu := true
+
+	if vm.Flavor.NumCPUs <= 0 {
+		vm.Flavor.NumCPUs = vmMo.Config.Hardware.NumCPU
+	}
+
+	if vm.Flavor.MemoryMB <= 0 {
+		vm.Flavor.MemoryMB = int64(vmMo.Config.Hardware.MemoryMB)
+	}
 
 	config := types.VirtualMachineConfigSpec{
 		NumCPUs:             vm.Flavor.NumCPUs,
