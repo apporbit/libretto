@@ -27,6 +27,12 @@ type VirtualMachine interface {
 	RemoveDisk([]string) error
 }
 
+type NetworkSettings struct {
+	Ip         string `json:"ip"`
+	Gateway    string `json:"gateway"`
+	SubnetMask string `json:"subnet_mask"`
+}
+
 const (
 	// VMStarting is the state to use when the VM is starting
 	VMStarting = "starting"
