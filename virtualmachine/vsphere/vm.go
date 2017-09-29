@@ -462,6 +462,14 @@ type Lease interface {
 	Complete() error
 }
 
+type VMInfo struct {
+	VMId               string
+	IpAddress          []net.IP
+	ToolsRunningStatus string
+	OverallCpuUsage    int64
+	GuestMemoryUsage   int64
+}
+
 type Flavor struct {
 	// Represents the number of CPUs
 	NumCPUs int32
@@ -836,6 +844,36 @@ func (vm *VM) Destroy() (err error) {
 		return fmt.Errorf("destroy task returned an error: %s", err)
 	}
 	return nil
+}
+
+//GetVMInfo returns information of this VM.
+func (vm *VM) GetVMInfo() (VMInfo, error) {
+	var vmInfo VMInfo
+	if err := SetupSession(vm); err != nil {
+		return vmInfo, err
+	}
+	defer vm.cancel()
+
+	// Get a reference to the datacenter with host and vm folders populated
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return vmInfo, err
+	}
+	vmMo, err := findVM(vm, dcMo, vm.Name)
+	if err != nil {
+		return vmInfo, err
+	}
+
+	ips, vmid, err := vm.GetIPsAndId()
+	toolsRunningStatus := vmMo.Guest.ToolsRunningStatus
+
+	vmInfo.VMId = vmid
+	vmInfo.IpAddress = ips
+	vmInfo.ToolsRunningStatus = toolsRunningStatus
+	vmInfo.OverallCpuUsage = int64(vmMo.Summary.QuickStats.OverallCpuUsage)
+	vmInfo.GuestMemoryUsage = int64(vmMo.Summary.QuickStats.GuestMemoryUsage)
+
+	return vmInfo, nil
 }
 
 // GetState returns the power state of this VM.
