@@ -694,9 +694,38 @@ func diffDisks(devList2, devList1 object.VirtualDeviceList) []string {
 	return disks
 }
 
+// CreateDisk creates a new VirtualDisk device which can be added to a VM.
+func CreateDisk(l object.VirtualDeviceList, c types.BaseVirtualController, ds types.ManagedObjectReference, name string, thinProvisioned bool) *types.VirtualDisk {
+	// If name is not specified, one will be chosen for you.
+	// But if when given, make sure it ends in .vmdk, otherwise it will be treated as a directory.
+	if len(name) > 0 && filepath.Ext(name) != ".vmdk" {
+		name += ".vmdk"
+	}
+
+	device := &types.VirtualDisk{
+		VirtualDevice: types.VirtualDevice{
+			Backing: &types.VirtualDiskFlatVer2BackingInfo{
+				DiskMode:        string(types.VirtualDiskModePersistent),
+				ThinProvisioned: types.NewBool(thinProvisioned),
+				VirtualDeviceFileBackingInfo: types.VirtualDeviceFileBackingInfo{
+					FileName:  name,
+					Datastore: &ds,
+				},
+			},
+		},
+	}
+
+	l.AssignController(device, c)
+	return device
+}
+
 //reconfigureVM :reconfigureVM adds the disks to the vm and returns the vmdk
 // file names of the disks added
 var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
+	var (
+		vDisk           *types.VirtualDisk
+		thinProvisioned bool
+	)
 	vmObj := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 
 	devList1, err := vmObj.Device(vm.ctx)
@@ -723,9 +752,15 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
 		if err != nil {
 			return nil, err
 		}
-		d := devices.CreateDisk(controller, dsMo.Reference(), "")
-		d.CapacityInKB = disk.Size
-		if err := vmObj.AddDevice(vm.ctx, d); err != nil {
+		if strings.ToLower(disk.Provisioning) == "thick" {
+			thinProvisioned = false
+		} else {
+			thinProvisioned = true
+		}
+		vDisk = CreateDisk(devices, controller, dsMo.Reference(), "",
+			thinProvisioned)
+		vDisk.CapacityInKB = disk.Size
+		if err := vmObj.AddDevice(vm.ctx, vDisk); err != nil {
 			return nil, err
 		}
 	}

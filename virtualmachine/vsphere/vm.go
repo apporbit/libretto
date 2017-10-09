@@ -405,8 +405,9 @@ type collector interface {
 
 // Disk represents a vSphere Disk to attach to the VM
 type Disk struct {
-	Size       int64
-	Controller string
+	Size         int64
+	Controller   string
+	Provisioning string
 }
 
 // Snapshot represents a vSphere snapshot to create
