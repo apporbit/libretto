@@ -106,6 +106,13 @@ func (svc *googleService) waitForOperationReady(operation string) error {
 	})
 }
 
+// waitForGlobalOperationReady waits for a global operation to finish.
+func (svc *googleService) waitForGlobalOperationReady(operation string) error {
+	return waitForOperation(OperationTimeout, func() (*googlecloud.Operation, error) {
+		return svc.service.GlobalOperations.Get(svc.vm.Project, operation).Do()
+	})
+}
+
 func (svc *googleService) getImage() (*googlecloud.Image, error) {
 	for _, img := range svc.vm.ImageProjects {
 		image, err := svc.service.Images.Get(img, svc.vm.SourceImage).Do()
@@ -300,7 +307,7 @@ func (svc *googleService) provision() error {
 				},
 				Network:    network.SelfLink,
 				Subnetwork: subnetworkSelfLink,
-				NetworkIP: svc.vm.PrivateIPAddress,
+				NetworkIP:  svc.vm.PrivateIPAddress,
 			},
 		},
 		Scheduling: &googlecloud.Scheduling{
@@ -434,4 +441,279 @@ func (svc *googleService) insertSSHKey() error {
 	}
 
 	return svc.waitForOperationReady(op.Name)
+}
+
+// getNetworkList gets the list of networks from the given project
+func (svc *googleService) getNetworkList() ([]*googlecloud.Network, error) {
+	networkList, err := svc.service.Networks.List(svc.vm.Project).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return networkList.Items, nil
+}
+
+// getSubnetworkList gets the list of subnets for the given combination of
+// project and region
+func (svc *googleService) getSubnetworkList() ([]*googlecloud.Subnetwork, error) {
+	subnetworkList, err := svc.service.Subnetworks.List(svc.vm.Project, svc.vm.Region).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return subnetworkList.Items, nil
+}
+
+// getMachineTypeList gets the list of machine types (aka flavors) for the
+// given project in the given zone
+func (svc *googleService) getMachineTypeList() ([]*googlecloud.MachineType, error) {
+	machineTypeList, err := svc.service.MachineTypes.List(svc.vm.Project, svc.vm.Zone).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return machineTypeList.Items, nil
+}
+
+// getDiskTypeList gets the list of disk types for the given project in the
+// given zone
+func (svc *googleService) getDiskTypeList() ([]*googlecloud.DiskType, error) {
+	diskTypeList, err := svc.service.DiskTypes.List(svc.vm.Project, svc.vm.Zone).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return diskTypeList.Items, nil
+}
+
+// getZoneList gets the list of zones
+func (svc *googleService) getZoneList() ([]*googlecloud.Zone, error) {
+	zoneList, err := svc.service.Zones.List(svc.vm.Project).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return zoneList.Items, nil
+}
+
+// getRegionList gets the list of regions
+func (svc *googleService) getRegionList() ([]*googlecloud.Region, error) {
+	regionList, err := svc.service.Regions.List(svc.vm.Project).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return regionList.Items, nil
+}
+
+// reset resets a GCE instance.
+func (svc *googleService) reset() error {
+	instance, err := svc.getInstance()
+	if err != nil {
+		return err
+	}
+
+	if instance.Status != "RUNNING" {
+		return fmt.Errorf("instance %s is not in RUNNING status, "+
+			"cannot reset instance in %s status",
+			instance.Name, instance.Status)
+	}
+
+	op, err := svc.service.Instances.Reset(svc.vm.Project, svc.vm.Zone, svc.vm.Name).Do()
+	if err != nil {
+		return err
+	}
+
+	return svc.waitForOperationReady(op.Name)
+}
+
+// getDiskType gets details of a disk type
+func (svc *googleService) getDiskType(diskType string) (*googlecloud.DiskType, error) {
+	return svc.service.DiskTypes.Get(svc.vm.Project, svc.vm.Zone, diskType).Do()
+}
+
+// createDisk creates a new disk in GCE
+func (svc *googleService) createDisk(disk *Disk) error {
+	diskType, err := svc.getDiskType(disk.DiskType)
+	if err != nil {
+		return err
+	}
+
+	gDisk := &googlecloud.Disk{
+		Name:        disk.Name,
+		SizeGb:      int64(disk.DiskSizeGb),
+		Type:        diskType.SelfLink,
+		Description: disk.Description,
+	}
+
+	op, err := svc.service.Disks.Insert(svc.vm.Project, svc.vm.Zone, gDisk).Do()
+	if err != nil {
+		return err
+	}
+	return svc.waitForOperationReady(op.Name)
+}
+
+// attachDisk attaches a disk to an instance
+func (svc *googleService) attachDisk(disk *Disk) error {
+
+	gDisk, err := svc.getDisk(disk.Name)
+	if err != nil {
+		return err
+	}
+
+	gAttachedDisk := &googlecloud.AttachedDisk{
+		Source:     gDisk.SelfLink,
+		DeviceName: disk.Name,
+		AutoDelete: disk.AutoDelete,
+	}
+
+	op, err := svc.service.Instances.AttachDisk(svc.vm.Project, svc.vm.Zone,
+		svc.vm.Name, gAttachedDisk).Do()
+
+	if err != nil {
+		return err
+	}
+	return svc.waitForOperationReady(op.Name)
+}
+
+// detachDisk detaches a disk from an instance
+func (svc *googleService) detachDisk(disk *Disk) error {
+
+	var deviceName string
+
+	gDisk, err := svc.getDisk(disk.Name)
+	if err != nil {
+		return err
+	}
+	instance, err := svc.getInstance()
+	if err != nil {
+		return err
+	}
+
+	for _, attachedDisk := range instance.Disks {
+		if attachedDisk.Source == gDisk.SelfLink {
+			deviceName = attachedDisk.DeviceName
+			break
+		}
+	}
+
+	op, err := svc.service.Instances.DetachDisk(svc.vm.Project, svc.vm.Zone,
+		svc.vm.Name, deviceName).Do()
+
+	if err != nil {
+		return err
+	}
+	return svc.waitForOperationReady(op.Name)
+
+}
+
+// getFirewall gets details of a firewall
+func (svc *googleService) getFirewall() (*googlecloud.Firewall, error) {
+	return svc.service.Firewalls.Get(svc.vm.Project, svc.vm.Firewall).Do()
+}
+
+// addFirewallPorts adds new ports to a firewall
+func (svc *googleService) addFirewallPorts() error {
+
+	currFirewall, err := svc.getFirewall()
+	if err != nil {
+		return err
+	}
+	newRules := currFirewall.Allowed
+	for _, endpoint := range svc.vm.Endpoints {
+		newRules = append(newRules, &googlecloud.FirewallAllowed{
+			IPProtocol: endpoint.Protocol,
+			Ports:      endpoint.Ports,
+		})
+	}
+
+	return svc.patchFirewall(newRules)
+}
+
+// patchFirewall patches the firewall with the given allowed ports (rules)
+func (svc *googleService) patchFirewall(allowed []*googlecloud.FirewallAllowed) error {
+	newFirewall := &googlecloud.Firewall{
+		Allowed: allowed,
+	}
+	op, err := svc.service.Firewalls.Patch(svc.vm.Project, svc.vm.Firewall,
+		newFirewall).Do()
+	if err != nil {
+		return err
+	}
+	return svc.waitForGlobalOperationReady(op.Name)
+}
+
+// removeFirewallPorts removes ports from a given firewall
+func (svc *googleService) removeFirewallPorts() error {
+	firewall, err := svc.getFirewall()
+	if err != nil {
+		return err
+	}
+	// Initialize new rules with the current one
+	// Refer to this link for structure of firewall resource
+	// https://cloud.google.com/compute/docs/reference/latest/firewalls
+	newRules := firewall.Allowed
+	// Define a map to identify ports to be removed
+	remPorts := make(map[string]map[string]bool)
+	// Define a map to deal with elements where the same protocol
+	// appears again
+	encountered := make(map[string]bool)
+	// Identify ports for each protocol to be removed
+	for _, endpoint := range svc.vm.Endpoints {
+		// Initialize the map only if the given protocol is encountered
+		// for the first time
+		if !encountered[endpoint.Protocol] {
+			remPorts[endpoint.Protocol] = make(map[string]bool)
+			encountered[endpoint.Protocol] = true
+		}
+		for _, port := range endpoint.Ports {
+			remPorts[endpoint.Protocol][port] = true
+		}
+	}
+
+	// Remove the the ports and protocols that are to be removed from the
+	// rules. Iterate through each item in the list of rules.
+	for indEndp := 0; indEndp < len(newRules); indEndp++ {
+		allowed := newRules[indEndp]
+		// Iterate through each port in the port list
+		for indPort := 0; indPort < len(newRules[indEndp].Ports); indPort++ {
+			port := newRules[indEndp].Ports[indPort]
+			// Process removal if the given port is to be removed
+			if remPorts[allowed.IPProtocol][port] {
+				newRules[indEndp].Ports[indPort] = ""
+				newRules[indEndp].Ports = append(
+					newRules[indEndp].Ports[:indPort],
+					newRules[indEndp].Ports[indPort+1:]...
+				)
+				// Set the index back by one because we have
+				// shifted elements from indP onwards to left
+				// by 1
+				indPort = indPort - 1
+			}
+		}
+		// At the end of removal of ports for a particular protocol if
+		// there are no ports left, then remove that protocol as well.
+		if len(newRules[indEndp].Ports) == 0 {
+			newRules[indEndp] = nil
+			newRules = append(newRules[:indEndp], newRules[indEndp+1:]...)
+			// Set the index back by one because we have shifted
+			// elements from indP onwards to left by 1
+			indEndp = indEndp - 1
+		}
+	}
+	return svc.patchFirewall(newRules)
+}
+
+// getImageList gets a list of available images in the given list of projects
+func (svc *googleService) getImageList() ([]*googlecloud.Image, error) {
+	imageListAll := make([]*googlecloud.Image, 0)
+	for _, project := range svc.vm.ImageProjects {
+		imageList, err := svc.service.Images.List(project).Do()
+		if err != nil {
+			return nil, err
+		}
+		imageListAll = append(imageListAll, imageList.Items...)
+	}
+
+	return imageListAll, nil
 }
