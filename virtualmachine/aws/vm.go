@@ -383,10 +383,18 @@ func (vm *VM) ResetKeyPair() {
 	vm.KeyPair = ""
 }
 
-func (vm *VM) AddDisk() error {
-        return errors.New("TO-DO")
+// AddDisk adds disk to instance
+func (vm *VM) AddDisk() ([]string, error) {
+    s := make([]string, 3)
+    return s,errors.New("TO-DO")
 }
 
-func (vm *VM) RemoveDisk(diskName string) error {
-        return errors.New("TO-DO")
+// RemoveDisk detach and remove disk from as instance
+func (vm *VM) RemoveDisk(diskName []string) error {
+    return errors.New("TO-DO")
+}
+
+// Reset resets instance
+func (vm *VM) Reset() error {
+    return errors.New("TO-DO")
 }
