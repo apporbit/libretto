@@ -717,3 +717,9 @@ func (svc *googleService) getImageList() ([]*googlecloud.Image, error) {
 
 	return imageListAll, nil
 }
+
+// convResURLToName returns resource name from the given resource URL
+func convResURLToName(url string) string {
+	urlSplit := strings.Split(url, "/")
+	return urlSplit[len(urlSplit)-1]
+}

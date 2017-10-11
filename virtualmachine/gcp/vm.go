@@ -10,7 +10,6 @@ import (
 	"github.com/apcera/libretto/ssh"
 	"github.com/apcera/libretto/util"
 	"github.com/apcera/libretto/virtualmachine"
-	"strings"
 )
 
 const (
@@ -528,12 +527,6 @@ func (vm *VM) GetRegionList() ([]Region, error) {
 	}
 
 	return response, nil
-}
-
-// convResURLToName returns resource name from the given resource URL
-func convResURLToName(url string) string {
-	urlSplit := strings.Split(url, "/")
-	return urlSplit[len(urlSplit)-1]
 }
 
 // AddNewDisks adds a new disks to an instance
