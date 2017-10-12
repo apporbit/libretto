@@ -10,6 +10,7 @@ import (
 	"github.com/apcera/libretto/ssh"
 	"github.com/apcera/libretto/util"
 	"github.com/apcera/libretto/virtualmachine"
+	"fmt"
 )
 
 const (
@@ -44,7 +45,6 @@ var (
 type VM struct {
 	Name        string
 	Description string
-	Region      string
 	Zone        string
 	MachineType string
 	Preemptible bool // Preemptible instances will be terminates after they run for 24 hours.
@@ -108,13 +108,18 @@ type Disk struct {
 	Description string
 }
 
-// AttachedDisk represents a disk attached to a GCE instance
-type AttachedDisk struct {
+// StorageDevice represents a disk attached to a GCE instance
+type StorageDevice struct {
 	Name       string `json:"name,omitempty"`
 	DevicePath string `json:"device_path,omitempty"`
 	Boot       *bool  `json:"boot,omitempty"`
 	AutoDelete *bool  `json:"auto_delete,omitempty"`
-	Interface  string `json:"interface,omitempty"`
+	// Interface specifies the disk interface to use for attaching this disk, which
+	// is either SCSI or NVME. The default is SCSI. Persistent disks must
+	// always use SCSI and the request will fail if you attempt to attach
+	// a persistent disk in any other format than SCSI. Local SSDs can use
+	// either NVME or SCSI.
+	Interface string `json:"interface,omitempty"`
 }
 
 // Network defines a VPC network in GCP
@@ -140,7 +145,7 @@ type Subnetwork struct {
 	IpCidrRange       string `json:"ipv4_range,omitempty"`
 }
 
-// MachinType defines GCP machine type (aka flavors)
+// MachineType defines GCP machine type (aka flavors)
 type MachineType struct {
 	Name        string `json:"name,omitempty"`
 	Description string `json:"description,omitempty"`
@@ -179,13 +184,13 @@ type Region struct {
 
 // InstanceData represents the details of a launched GCE instance
 type InstanceData struct {
-	Name              string         `json:"name,omitempty"`
-	Id                uint64         `json:"id,omitempty,string"`
-	Status            string         `json:"status,omitempty"`
-	CreationTimestamp string         `json:"creation_timestamp,omitempty"`
-	PrivateIpv4       string         `json:"private_ipv4,omitempty"`
-	PublicIpv4        string         `json:"public_ipv4,omitempty"`
-	Volumes           []AttachedDisk `json:"volumes,omitempty"`
+	Name              string          `json:"name,omitempty"`
+	Id                uint64          `json:"id,omitempty,string"`
+	Status            string          `json:"status,omitempty"`
+	CreationTimestamp string          `json:"creation_timestamp,omitempty"`
+	PrivateIpv4       string          `json:"private_ipv4,omitempty"`
+	PublicIpv4        string          `json:"public_ipv4,omitempty"`
+	Volumes           []StorageDevice `json:"volumes,omitempty"`
 }
 
 // GetName returns the name of the virtual machine.
@@ -285,6 +290,16 @@ func (vm *VM) Reset() error {
 		return err
 	}
 
+	instance, err := s.getInstance()
+	if err != nil {
+		return err
+	}
+
+	if instance.Status != "RUNNING" {
+		return fmt.Errorf("instance %s is not in RUNNING status, "+
+			"cannot reset instance in %s status",
+			instance.Name, instance.Status)
+	}
 	return s.reset()
 }
 
@@ -339,6 +354,7 @@ func (vm *VM) DeleteDisks() error {
 // function's signature will be different for vsphere, gcp and aws. This can be
 // cleaned up when the VirtualMachine interface is corrected. Please refer to
 // AddNewDisks function to add new disks to an instance.
+// TODO
 func (vm *VM) AddDisk() ([]string, error) {
 	return nil, nil
 }
@@ -347,6 +363,7 @@ func (vm *VM) AddDisk() ([]string, error) {
 // function's signature will be different for vsphere, gcp and aws. This can be
 // cleaned up when the VirtualMachine interface is corrected. Please refer to
 // DeleteVMDisks function to detach and delete disks from a VM.
+// TODO
 func (vm *VM) RemoveDisk(diskName []string) error {
 	return errors.New("TO-DO")
 }
@@ -529,10 +546,11 @@ func (vm *VM) GetRegionList() ([]Region, error) {
 	return response, nil
 }
 
-// AddNewDisks adds a new disks to an instance
-func (vm *VM) AddNewDisks() ([]AttachedDisk, error) {
+// AddNewDisks create new disks as per given specifications and then attaches
+// to the given instance.
+func (vm *VM) AddNewDisks() ([]StorageDevice, error) {
 	disksPresent := make(map[string]bool)
-	response := make([]AttachedDisk, 0)
+	response := make([]StorageDevice, 0)
 
 	s, err := vm.getService()
 	if err != nil {
@@ -557,7 +575,7 @@ func (vm *VM) AddNewDisks() ([]AttachedDisk, error) {
 
 	for _, attachedDisk := range instance.Disks {
 		if disksPresent[attachedDisk.DeviceName] {
-			response = append(response, AttachedDisk{
+			response = append(response, StorageDevice{
 				Name:       attachedDisk.DeviceName,
 				Boot:       &attachedDisk.Boot,
 				AutoDelete: &attachedDisk.AutoDelete,
@@ -568,22 +586,6 @@ func (vm *VM) AddNewDisks() ([]AttachedDisk, error) {
 		}
 	}
 	return response, nil
-}
-
-// IsInstance checks if the given instance is present in GCP. Returns true if
-// instance is available else false.
-func (vm *VM) IsInstance() (bool, error) {
-	s, err := vm.getService()
-	if err != nil {
-		return false, err
-	}
-
-	_, err = s.getInstance()
-	if err != nil {
-		return false, err
-	} else {
-		return true, nil
-	}
 }
 
 // DeleteVMDisk detaches the given disks from the instance and deletes them
@@ -630,7 +632,7 @@ func (vm *VM) GetInstance() (*InstanceData, error) {
 		PublicIpv4:        ips[PublicIP].String(),
 	}
 	for _, attachedDisk := range instance.Disks {
-		vmResponse.Volumes = append(vmResponse.Volumes, AttachedDisk{
+		vmResponse.Volumes = append(vmResponse.Volumes, StorageDevice{
 			Name:       attachedDisk.DeviceName,
 			Boot:       &attachedDisk.Boot,
 			AutoDelete: &attachedDisk.AutoDelete,
@@ -649,7 +651,7 @@ func (vm *VM) AddEndpoints() error {
 	if err != nil {
 		return err
 	}
-	return s.addFirewallPorts()
+	return s.addFirewallRules()
 }
 
 // RemoveEndpoints removes given endpoints from the given firewall
@@ -658,7 +660,7 @@ func (vm *VM) RemoveEndpoints() error {
 	if err != nil {
 		return err
 	}
-	return s.removeFirewallPorts()
+	return s.removeFirewallRules()
 }
 
 // GetImageList lists images available in given projects

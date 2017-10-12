@@ -456,7 +456,7 @@ func (svc *googleService) getNetworkList() ([]*googlecloud.Network, error) {
 // getSubnetworkList gets the list of subnets for the given combination of
 // project and region
 func (svc *googleService) getSubnetworkList() ([]*googlecloud.Subnetwork, error) {
-	subnetworkList, err := svc.service.Subnetworks.List(svc.vm.Project, svc.vm.Region).Do()
+	subnetworkList, err := svc.service.Subnetworks.List(svc.vm.Project, svc.vm.region()).Do()
 	if err != nil {
 		return nil, err
 	}
@@ -473,17 +473,6 @@ func (svc *googleService) getMachineTypeList() ([]*googlecloud.MachineType, erro
 	}
 
 	return machineTypeList.Items, nil
-}
-
-// getDiskTypeList gets the list of disk types for the given project in the
-// given zone
-func (svc *googleService) getDiskTypeList() ([]*googlecloud.DiskType, error) {
-	diskTypeList, err := svc.service.DiskTypes.List(svc.vm.Project, svc.vm.Zone).Do()
-	if err != nil {
-		return nil, err
-	}
-
-	return diskTypeList.Items, nil
 }
 
 // getZoneList gets the list of zones
@@ -508,23 +497,23 @@ func (svc *googleService) getRegionList() ([]*googlecloud.Region, error) {
 
 // reset resets a GCE instance.
 func (svc *googleService) reset() error {
-	instance, err := svc.getInstance()
-	if err != nil {
-		return err
-	}
-
-	if instance.Status != "RUNNING" {
-		return fmt.Errorf("instance %s is not in RUNNING status, "+
-			"cannot reset instance in %s status",
-			instance.Name, instance.Status)
-	}
-
 	op, err := svc.service.Instances.Reset(svc.vm.Project, svc.vm.Zone, svc.vm.Name).Do()
 	if err != nil {
 		return err
 	}
 
 	return svc.waitForOperationReady(op.Name)
+}
+
+// getDiskTypeList gets the list of disk types for the given project in the
+// given zone
+func (svc *googleService) getDiskTypeList() ([]*googlecloud.DiskType, error) {
+	diskTypeList, err := svc.service.DiskTypes.List(svc.vm.Project, svc.vm.Zone).Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return diskTypeList.Items, nil
 }
 
 // getDiskType gets details of a disk type
@@ -613,7 +602,7 @@ func (svc *googleService) getFirewall() (*googlecloud.Firewall, error) {
 }
 
 // addFirewallPorts adds new ports to a firewall
-func (svc *googleService) addFirewallPorts() error {
+func (svc *googleService) addFirewallRules() error {
 
 	currFirewall, err := svc.getFirewall()
 	if err != nil {
@@ -644,16 +633,10 @@ func (svc *googleService) patchFirewall(allowed []*googlecloud.FirewallAllowed) 
 }
 
 // removeFirewallPorts removes ports from a given firewall
-func (svc *googleService) removeFirewallPorts() error {
-	firewall, err := svc.getFirewall()
-	if err != nil {
-		return err
-	}
-	// Initialize new rules with the current one
-	// Refer to this link for structure of firewall resource
-	// https://cloud.google.com/compute/docs/reference/latest/firewalls
-	newRules := firewall.Allowed
-	// Define a map to identify ports to be removed
+func (svc *googleService) removeFirewallRules() error {
+	// Define a map to identify ports to be removed. It will record the
+	// ports with corresponding protocol as remPorts[Protocol][Port] = true
+	// for each protocol and port combination.
 	remPorts := make(map[string]map[string]bool)
 	// Define a map to deal with elements where the same protocol
 	// appears again
@@ -662,7 +645,7 @@ func (svc *googleService) removeFirewallPorts() error {
 	for _, endpoint := range svc.vm.Endpoints {
 		// Initialize the map only if the given protocol is encountered
 		// for the first time
-		if !encountered[endpoint.Protocol] {
+		if ok := encountered[endpoint.Protocol]; !ok {
 			remPorts[endpoint.Protocol] = make(map[string]bool)
 			encountered[endpoint.Protocol] = true
 		}
@@ -671,34 +654,43 @@ func (svc *googleService) removeFirewallPorts() error {
 		}
 	}
 
-	// Remove the the ports and protocols that are to be removed from the
+	// Initialize new rules with the current one
+	// Refer to this link for structure of firewall resource
+	// https://cloud.google.com/compute/docs/reference/latest/firewalls
+	firewall, err := svc.getFirewall()
+	if err != nil {
+		return err
+	}
+	newRules := firewall.Allowed
+
+	// Remove the ports and protocols that are to be removed from the
 	// rules. Iterate through each item in the list of rules.
-	for indEndp := 0; indEndp < len(newRules); indEndp++ {
-		allowed := newRules[indEndp]
+	for indexEndp := 0; indexEndp < len(newRules); indexEndp++ {
+		allowed := newRules[indexEndp]
 		// Iterate through each port in the port list
-		for indPort := 0; indPort < len(newRules[indEndp].Ports); indPort++ {
-			port := newRules[indEndp].Ports[indPort]
+		for indPort := 0; indPort < len(newRules[indexEndp].Ports); indPort++ {
+			port := newRules[indexEndp].Ports[indPort]
 			// Process removal if the given port is to be removed
-			if remPorts[allowed.IPProtocol][port] {
-				newRules[indEndp].Ports[indPort] = ""
-				newRules[indEndp].Ports = append(
-					newRules[indEndp].Ports[:indPort],
-					newRules[indEndp].Ports[indPort+1:]...
+			if ok := remPorts[allowed.IPProtocol][port]; ok {
+				newRules[indexEndp].Ports[indPort] = ""
+				newRules[indexEndp].Ports = append(
+					newRules[indexEndp].Ports[:indPort],
+					newRules[indexEndp].Ports[indPort+1:]...
 				)
 				// Set the index back by one because we have
 				// shifted elements from indP onwards to left
-				// by 1
+				// by one
 				indPort = indPort - 1
 			}
 		}
 		// At the end of removal of ports for a particular protocol if
 		// there are no ports left, then remove that protocol as well.
-		if len(newRules[indEndp].Ports) == 0 {
-			newRules[indEndp] = nil
-			newRules = append(newRules[:indEndp], newRules[indEndp+1:]...)
+		if len(newRules[indexEndp].Ports) == 0 {
+			newRules[indexEndp] = nil
+			newRules = append(newRules[:indexEndp], newRules[indexEndp+1:]...)
 			// Set the index back by one because we have shifted
-			// elements from indP onwards to left by 1
-			indEndp = indEndp - 1
+			// elements from indP onwards to left by one
+			indexEndp = indexEndp - 1
 		}
 	}
 	return svc.patchFirewall(newRules)
@@ -722,4 +714,20 @@ func (svc *googleService) getImageList() ([]*googlecloud.Image, error) {
 func convResURLToName(url string) string {
 	urlSplit := strings.Split(url, "/")
 	return urlSplit[len(urlSplit)-1]
+}
+
+// IsInstance checks if the given instance is present in GCP. Returns true if
+// instance is available else false.
+func (vm *VM) IsInstance() (bool, error) {
+	s, err := vm.getService()
+	if err != nil {
+		return false, err
+	}
+
+	_, err = s.getInstance()
+	if err != nil {
+		return false, err
+	} else {
+		return true, nil
+	}
 }
