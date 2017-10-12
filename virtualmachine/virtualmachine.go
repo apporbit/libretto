@@ -21,10 +21,7 @@ type VirtualMachine interface {
 	Resume() error
 	Halt() error
 	Start() error
-	Reset() error
 	GetSSH(ssh.Options) (ssh.Client, error)
-	AddDisk() ([]string, error)
-	RemoveDisk([]string) error
 }
 
 type NetworkSettings struct {

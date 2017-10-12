@@ -382,11 +382,3 @@ func (vm *VM) ResetKeyPair() {
 	vm.SSHCreds.SSHPrivateKey = ""
 	vm.KeyPair = ""
 }
-
-func (vm *VM) AddDisk() error {
-        return errors.New("TO-DO")
-}
-
-func (vm *VM) RemoveDisk(diskName string) error {
-        return errors.New("TO-DO")
-}
