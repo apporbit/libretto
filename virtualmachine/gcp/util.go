@@ -601,7 +601,7 @@ func (svc *googleService) getFirewall() (*googlecloud.Firewall, error) {
 	return svc.service.Firewalls.Get(svc.vm.Project, svc.vm.Firewall).Do()
 }
 
-// addFirewallPorts adds new ports to a firewall
+// addFirewallRules adds new ports to a firewall
 func (svc *googleService) addFirewallRules() error {
 
 	currFirewall, err := svc.getFirewall()
@@ -632,7 +632,7 @@ func (svc *googleService) patchFirewall(allowed []*googlecloud.FirewallAllowed) 
 	return svc.waitForGlobalOperationReady(op.Name)
 }
 
-// removeFirewallPorts removes ports from a given firewall
+// removeFirewallRules removes ports from a given firewall
 func (svc *googleService) removeFirewallRules() error {
 	// Define a map to identify ports to be removed. It will record the
 	// ports with corresponding protocol as remPorts[Protocol][Port] = true
