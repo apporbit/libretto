@@ -615,7 +615,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	if err != nil {
 		return fmt.Errorf("Error retrieving custom spec: %v", err)
 	}
-	customSpec := updateCustomSpec(vm, &customSpecItem.Spec)
+	customSpec := updateCustomSpec(vm, vmMo, &customSpecItem.Spec)
 
 	cisp := types.VirtualMachineCloneSpec{
 		Location:      relocateSpec,
@@ -1314,12 +1314,13 @@ func createCustomSpecStaticIp(vm *VM) error {
 }
 
 // updateCustomSpec: updates custom spec structure with the ip settings
-func updateCustomSpec(vm *VM,
+func updateCustomSpec(vm *VM, tempMo *mo.VirtualMachine,
 	customSpec *types.CustomizationSpec) *types.CustomizationSpec {
 	// if ip or subnet is not passed return nil
 	if vm.NetworkSettings.Ip == "" || vm.NetworkSettings.SubnetMask == "" {
 		return nil
 	}
+	// set ip address, subnet mask, default gateway
 	nicSetting := customSpec.NicSettingMap[0]
 	ip := nicSetting.Adapter.Ip
 	ipValue := reflect.ValueOf(ip).Elem()
@@ -1330,6 +1331,18 @@ func updateCustomSpec(vm *VM,
 	nicSetting.Adapter.SubnetMask = vm.NetworkSettings.SubnetMask
 	gateway := vm.NetworkSettings.Gateway
 	nicSetting.Adapter.Gateway = append(nicSetting.Adapter.Gateway, gateway)
+
+	// set dns server
+	if vm.NetworkSettings.DnsServer != "" {
+		dnsServerList := []string{vm.NetworkSettings.DnsServer}
+		for _, ip := range tempMo.Guest.IpStack {
+			dnsServerList = append(dnsServerList,
+				ip.DnsConfig.IpAddress...)
+		}
+		customSpec.GlobalIPSettings.DnsServerList = append(
+			customSpec.GlobalIPSettings.DnsServerList,
+			dnsServerList...)
+	}
 
 	return customSpec
 }

@@ -25,9 +25,10 @@ type VirtualMachine interface {
 }
 
 type NetworkSettings struct {
-	Ip         string `json:"ip"`
-	Gateway    string `json:"gateway"`
+	Ip         string `json:"ip_address"`
+	Gateway    string `json:"default_gateway"`
 	SubnetMask string `json:"subnet_mask"`
+	DnsServer  string `json:"dns_server"`
 }
 
 const (
