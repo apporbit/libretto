@@ -193,6 +193,33 @@ type InstanceData struct {
 	Volumes           []StorageDevice `json:"volumes,omitempty"`
 }
 
+// Account represents a Google cloud account. It is used to make non VM related
+// calls such as GetProjectList()
+type Account struct {
+	// AccountFile: Represents the JSON file required to authenticate a
+	// Google cloud service account
+	AccountFile string
+	// account: Represents a structure containing private key, client email
+	// and client ID parsed from AccountFile
+	account accountFile
+	// Scopes: Represents access scopes with which API call is made
+	Scopes []string
+}
+
+// Project represents a Google cloud project
+type Project struct {
+	// Name represents project name
+	Name string `json:"name,omitempty"`
+	// ProjectID represents the unique, user-assigned ID of the project
+	ProjectID string `json:"project_id,omitempty"`
+	// ProjectNumber represents the google-assigned unique project number
+	ProjectNumber int64 `json:"project_number,omitempty,string"`
+	// LifecycleState is a read-only field giving state of the project
+	LifecycleState string `json:"lifecycle_state,omitempty"`
+	// CreateTime gives the project creation time
+	CreateTime string `json:"create_time,omitempty"`
+}
+
 // GetName returns the name of the virtual machine.
 func (vm *VM) GetName() string {
 	return vm.Name
@@ -348,24 +375,6 @@ func (vm *VM) DeleteDisks() error {
 	}
 
 	return nil
-}
-
-// This function cannot be used in GCP as defined in the interface. The
-// function's signature will be different for vsphere, gcp and aws. This can be
-// cleaned up when the VirtualMachine interface is corrected. Please refer to
-// AddNewDisks function to add new disks to an instance.
-// TODO
-func (vm *VM) AddDisk() ([]string, error) {
-	return nil, nil
-}
-
-// This function cannot be used in GCP as defined in the interface. The
-// function's signature will be different for vsphere, gcp and aws. This can be
-// cleaned up when the VirtualMachine interface is corrected. Please refer to
-// DeleteVMDisks function to detach and delete disks from a VM.
-// TODO
-func (vm *VM) RemoveDisk(diskName []string) error {
-	return errors.New("TO-DO")
 }
 
 // GetNetworkList gets the list of VPC networks
@@ -695,6 +704,33 @@ func (vm *VM) GetImageList() ([]Image, error) {
 			CreationTimestamp:      image.CreationTimestamp,
 			DiskSizeGb:             image.DiskSizeGb,
 			Family:                 image.Family,
+		})
+	}
+
+	return response, nil
+}
+
+// GetProjectList: Gets list of projects
+func (acc *Account) GetProjectList() ([]Project, error) {
+	s, err := acc.getResManService()
+	if err != nil {
+		return nil, err
+	}
+
+	projectList, err := s.getProjectList()
+	if err != nil {
+		return nil, err
+	}
+
+	response := make([]Project, 0)
+
+	for _, project := range projectList {
+		response = append(response, Project{
+			Name:           project.Name,
+			ProjectID:      project.ProjectId,
+			ProjectNumber:  project.ProjectNumber,
+			LifecycleState: project.LifecycleState,
+			CreateTime:     project.CreateTime,
 		})
 	}
 
