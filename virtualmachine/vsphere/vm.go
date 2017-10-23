@@ -408,6 +408,7 @@ type Disk struct {
 	Size         int64
 	Controller   string
 	Provisioning string
+	Datastore    string
 }
 
 // Snapshot represents a vSphere snapshot to create
