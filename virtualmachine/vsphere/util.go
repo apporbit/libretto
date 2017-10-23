@@ -192,12 +192,12 @@ var downloadOva = func(basePath, url string) (string, error) {
 var parseOvf = func(ovfLocation string) (string, error) {
 	ovf, err := open(ovfLocation)
 	if err != nil {
-		return "", fmt.Errorf("Failed to open the ovf file: %s", err)
+		return "", fmt.Errorf("Failed to open the ovf file: %v", err)
 	}
 
 	ovfContent, err := readAll(ovf)
 	if err != nil {
-		return "", fmt.Errorf("Failed to open the ovf file: %s", err)
+		return "", fmt.Errorf("Failed to open the ovf file: %v", err)
 	}
 	return string(ovfContent), nil
 }
@@ -307,7 +307,7 @@ var uploadOvf = func(vm *VM, specResult *types.OvfCreateImportSpecResult, lease 
 	// Ask the server to wait on the NFC lease
 	leaseInfo, err := lease.Wait()
 	if err != nil {
-		return fmt.Errorf("error waiting on the nfc lease: %s", err)
+		return fmt.Errorf("error waiting on the nfc lease: %v", err)
 	}
 
 	//FIXME (Preet): Hard coded to just upload the first device.
@@ -553,7 +553,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	}
 	vmMo, err := findVM(vm, dcMo, template)
 	if err != nil {
-		return fmt.Errorf("error retrieving template: %s", err)
+		return fmt.Errorf("error retrieving template: %v", err)
 	}
 	vmObj := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 
@@ -646,18 +646,18 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	folderObj := object.NewFolder(vm.client.Client, dcMo.VmFolder)
 	t, err := vmObj.Clone(vm.ctx, folderObj, vm.Name, cisp)
 	if err != nil {
-		return fmt.Errorf("error cloning vm from template: %s", err)
+		return fmt.Errorf("error cloning vm from template: %v", err)
 	}
 	tInfo, err := t.WaitForResult(vm.ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error waiting for clone task to finish: %s", err)
+		return fmt.Errorf("error waiting for clone task to finish: %v", err)
 	}
 	if tInfo.Error != nil {
-		return fmt.Errorf("clone task finished with error: %s", tInfo.Error)
+		return fmt.Errorf("clone task finished with error: %v", tInfo.Error)
 	}
 	vmMo, err = findVM(vm, dcMo, vm.Name)
 	if err != nil {
-		return fmt.Errorf("failed to retrieve cloned VM: %s", err)
+		return fmt.Errorf("failed to retrieve cloned VM: %v", err)
 	}
 	if len(vm.Disks) > 0 {
 		if _, err = reconfigureVM(vm, vmMo); err != nil {
@@ -785,7 +785,7 @@ var waitForIP = func(vm *VM, vmMo *mo.VirtualMachine) error {
 	vmObj := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 	ipString, err := vmObj.WaitForIP(vm.ctx)
 	if err != nil {
-		return fmt.Errorf("failed to wait for VM to boot up: %s", err)
+		return fmt.Errorf("failed to wait for VM to boot up: %v", err)
 	}
 
 	// Parse the IP to make sure tools was running
@@ -798,6 +798,16 @@ var waitForIP = func(vm *VM, vmMo *mo.VirtualMachine) error {
 
 var halt = func(vm *VM) error {
 	// Get a reference to the datacenter with host and vm folders populated
+	state, err := getState(vm)
+	if err != nil {
+		return fmt.Errorf("Error getting state of vm : %v", err)
+	}
+	if state == "standby" {
+		err = start(vm)
+		if err != nil {
+			return err
+		}
+	}
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
 		return err
@@ -809,14 +819,15 @@ var halt = func(vm *VM) error {
 	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 	poweroffTask, err := vmo.PowerOff(vm.ctx)
 	if err != nil {
-		return fmt.Errorf("error creating a poweroff task on the vm: %s", err)
+		return fmt.Errorf(
+			"error creating a poweroff task on the vm: %v", err)
 	}
 	tInfo, err := poweroffTask.WaitForResult(vm.ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error waiting for poweroff task: %s", err)
+		return fmt.Errorf("error waiting for poweroff task: %v", err)
 	}
 	if tInfo.Error != nil {
-		return fmt.Errorf("poweroff task returned an error: %s", err)
+		return fmt.Errorf("poweroff task returned an error: %v", err)
 	}
 	return nil
 }
@@ -835,7 +846,7 @@ var shutDown = func(vm *VM) error {
 	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 	err = vmo.ShutdownGuest(vm.ctx)
 	if err != nil {
-		return fmt.Errorf("error initiating shutDown on the vm: %s", err)
+		return fmt.Errorf("error initiating shutDown on the vm: %v", err)
 	}
 	return nil
 }
@@ -854,7 +865,7 @@ var restart = func(vm *VM) error {
 	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 	err = vmo.RebootGuest(vm.ctx)
 	if err != nil {
-		return fmt.Errorf("error initiating reboot on the vm: %s", err)
+		return fmt.Errorf("error initiating reboot on the vm: %v", err)
 	}
 	return nil
 }
@@ -876,14 +887,14 @@ var start = func(vm *VM) error {
 	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 	poweronTask, err := vmo.PowerOn(vm.ctx)
 	if err != nil {
-		return fmt.Errorf("error creating a poweron task on the vm: %s", err)
+		return fmt.Errorf("error creating a poweron task on the vm: %v", err)
 	}
 	tInfo, err := poweronTask.WaitForResult(vm.ctx, nil)
 	if err != nil {
-		return fmt.Errorf("error waiting for poweron task: %s", err)
+		return fmt.Errorf("error waiting for poweron task: %v", err)
 	}
 	if tInfo.Error != nil {
-		return fmt.Errorf("poweron task returned an error: %s", err)
+		return fmt.Errorf("poweron task returned an error: %v", err)
 	}
 	if !vm.SkipIPWait {
 		if err = waitForIP(vm, vmMo); err != nil {
@@ -1028,7 +1039,7 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 	}
 	defer func() {
 		if err := os.RemoveAll(downloadOvaPath); err != nil {
-			fmt.Errorf("can't remove temp directory, error: %s", err.Error())
+			fmt.Errorf("can't remove temp directory, error: %v", err.Error())
 		}
 	}()
 	// Read the ovf file
@@ -1065,12 +1076,12 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 	specResult, err := ovfManager.CreateImportSpec(vm.ctx, ovfContent, rpo,
 		object.NewDatastore(vm.client.Client, dsMo.Reference()), cisp)
 	if err != nil {
-		return fmt.Errorf("failed to create an import spec for the VM: %s", err)
+		return fmt.Errorf("failed to create an import spec for the VM: %v", err)
 	}
 
 	// FIXME (Preet) specResult can also have warnings. Need to log/return those.
 	if specResult.Error != nil {
-		return fmt.Errorf("errors returned from the ovf manager api. Errors: %s", specResult.Error)
+		return fmt.Errorf("errors returned from the ovf manager api. Errors: %v", specResult.Error)
 	}
 
 	// If any of the unit numbers in the spec are 0, they need to be reset to -1
@@ -1081,17 +1092,17 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 	fo := object.NewFolder(vm.client.Client, dcMo.VmFolder)
 	lease, err := rpo.ImportVApp(vm.ctx, specResult.ImportSpec, fo, hso)
 	if err != nil {
-		return fmt.Errorf("error getting an nfc lease: %s", err)
+		return fmt.Errorf("error getting an nfc lease: %v", err)
 	}
 
 	err = uploadOvf(vm, specResult, NewLease(vm.ctx, lease))
 	if err != nil {
-		return fmt.Errorf("error uploading the ovf template: %s", err)
+		return fmt.Errorf("error uploading the ovf template: %v", err)
 	}
 
 	vmMo, err := findVM(vm, dcMo, template)
 	if err != nil {
-		return fmt.Errorf("error getting the uploaded VM: %s", err)
+		return fmt.Errorf("error getting the uploaded VM: %v", err)
 	}
 
 	// LinkedClones cannot be created from templates, but must be created from snapshots of VMs.
@@ -1110,19 +1121,19 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 		snapshotTask, err := vmo.CreateSnapshot(vm.ctx, s.Name, s.Description, s.Memory, s.Quiesce)
 
 		if err != nil {
-			return fmt.Errorf("error creating snapshot of the vm: %s", err)
+			return fmt.Errorf("error creating snapshot of the vm: %v", err)
 		}
 		tInfo, err := snapshotTask.WaitForResult(vm.ctx, nil)
 		if err != nil {
-			return fmt.Errorf("error waiting for snapshot to finish: %s", err)
+			return fmt.Errorf("error waiting for snapshot to finish: %v", err)
 		}
 		if tInfo.Error != nil {
-			return fmt.Errorf("snapshot task returned an error: %s", err)
+			return fmt.Errorf("snapshot task returned an error: %v", err)
 		}
 	} else {
 		err = vmo.MarkAsTemplate(vm.ctx)
 		if err != nil {
-			return fmt.Errorf("error converting the uploaded VM to a template: %s", err)
+			return fmt.Errorf("error converting the uploaded VM to a template: %v", err)
 		}
 	}
 	return nil
