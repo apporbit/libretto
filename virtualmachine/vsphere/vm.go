@@ -470,6 +470,10 @@ type VMInfo struct {
 	ToolsRunningStatus string
 	OverallCpuUsage    int64
 	GuestMemoryUsage   int64
+	MaxCpuUsage        int32
+	MaxMemoryUsage     int32
+	NumCpu             int32
+	PowerState         string
 }
 
 type Flavor struct {
@@ -876,6 +880,10 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 	vmInfo.ToolsRunningStatus = toolsRunningStatus
 	vmInfo.OverallCpuUsage = int64(vmMo.Summary.QuickStats.OverallCpuUsage)
 	vmInfo.GuestMemoryUsage = int64(vmMo.Summary.QuickStats.GuestMemoryUsage)
+	vmInfo.MaxCpuUsage = vmMo.Runtime.MaxCpuUsage
+	vmInfo.MaxMemoryUsage = vmMo.Runtime.MaxMemoryUsage
+	vmInfo.PowerState = string(vmMo.Runtime.PowerState)
+	vmInfo.NumCpu = vmMo.Summary.Config.NumCpu
 
 	return vmInfo, nil
 }
