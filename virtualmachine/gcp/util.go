@@ -12,12 +12,14 @@ import (
 	"os"
 	"strings"
 	"time"
+	"context"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/jwt"
 
 	googlecloud "google.golang.org/api/compute/v1"
+	googleresourcemanager "google.golang.org/api/cloudresourcemanager/v1"
 )
 
 var (
@@ -30,11 +32,58 @@ type googleService struct {
 	service *googlecloud.Service
 }
 
+// googleResManService represents a service that is used to call Google cloud
+// resource manger APIs.
+type googleResManService struct {
+	// account represents the Google cloud account that is used to make
+	// calls to Google cloud resource manager APIs.
+	account     *Account
+	// service: represents an object that contains an http client that is
+	// used to make calls to Google cloud resource manager APIs.
+	service *googleresourcemanager.Service
+}
+
 // accountFile represents the structure of the account file JSON file.
 type accountFile struct {
 	PrivateKey  string `json:"private_key"`
 	ClientEmail string `json:"client_email"`
 	ClientId    string `json:"client_id"`
+}
+
+// getResManService processes the account file and returns the service object
+// to make API calls
+func (acc *Account) getResManService() (*googleResManService, error) {
+	var err error
+	var client *http.Client
+
+	if err = parseAccountFile(&acc.account, acc.AccountFile); err != nil {
+		return nil, err
+	}
+
+	// Auth with AccountFile first if provided
+	if acc.account.PrivateKey != "" {
+		config := jwt.Config{
+			Email:      acc.account.ClientEmail,
+			PrivateKey: []byte(acc.account.PrivateKey),
+			Scopes:     acc.Scopes,
+			TokenURL:   tokenURL,
+		}
+		client = config.Client(context.Background())
+	} else {
+		client = &http.Client{
+			Timeout: time.Duration(30 * time.Second),
+			Transport: &oauth2.Transport{
+				Source: google.ComputeTokenSource(""),
+			},
+		}
+	}
+
+	svc, err := googleresourcemanager.New(client)
+	if err != nil {
+		return nil, err
+	}
+
+	return &googleResManService{acc, svc}, nil
 }
 
 func (vm *VM) getService() (*googleService, error) {
@@ -730,4 +779,15 @@ func (vm *VM) IsInstance() (bool, error) {
 	} else {
 		return true, nil
 	}
+}
+
+// getProjectList retrieves the list of projects that the given Google cloud
+// service account has access to.
+func (svc *googleResManService) getProjectList() ([]*googleresourcemanager.Project, error) {
+	projectList, err := svc.service.Projects.List().Do()
+	if err != nil {
+		return nil, err
+	}
+
+	return projectList.Projects, nil
 }

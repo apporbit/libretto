@@ -335,6 +335,15 @@
 			"notests": true
 		},
 		{
+			"importpath": "google.golang.org/api/cloudresourcemanager/v1",
+			"repository": "https://code.googlesource.com/google-api-go-client",
+			"vcs": "git",
+			"revision": "89c815feb645bf719a710e37089efe9f97d87dc8",
+			"branch": "master",
+			"path": "/cloudresourcemanager/v1",
+			"notests": true
+		},
+		{
 			"importpath": "google.golang.org/api/compute/v1",
 			"repository": "https://code.googlesource.com/google-api-go-client",
 			"vcs": "git",
@@ -356,7 +365,7 @@
 			"importpath": "google.golang.org/api/googleapi",
 			"repository": "https://code.googlesource.com/google-api-go-client",
 			"vcs": "git",
-			"revision": "eeba0f9a5982027f920574de995cd46f96058368",
+			"revision": "89c815feb645bf719a710e37089efe9f97d87dc8",
 			"branch": "master",
 			"path": "/googleapi",
 			"notests": true
