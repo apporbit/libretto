@@ -4,13 +4,13 @@ package gcp
 
 import (
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
 	"github.com/apcera/libretto/ssh"
 	"github.com/apcera/libretto/util"
 	"github.com/apcera/libretto/virtualmachine"
-	"fmt"
 )
 
 const (
@@ -70,6 +70,11 @@ type VM struct {
 
 	Firewall  string // required when modifying firewall rules
 	Endpoints []Endpoint
+
+	// RawDiskSource is the full Google Cloud Storage URL ere the raw disk
+	// image is stored. It is required only for creating a new image from
+	// a raw disk.
+	RawDiskSource string
 }
 
 // Endpoint represents the protocol and ports configured in a firewall
@@ -735,4 +740,24 @@ func (acc *Account) GetProjectList() ([]Project, error) {
 	}
 
 	return response, nil
+}
+
+// CreateImage: Creates a new image from raw disk
+func (vm *VM) CreateImage() error {
+	s, err := vm.getService()
+	if err != nil {
+		return err
+	}
+
+	return s.createImage()
+}
+
+// DeleteImage: Deletes an image
+func (vm *VM) DeleteImage() error {
+	s, err := vm.getService()
+	if err != nil {
+		return err
+	}
+
+	return s.deleteImage()
 }

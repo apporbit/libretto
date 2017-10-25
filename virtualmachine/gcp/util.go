@@ -37,7 +37,7 @@ type googleService struct {
 type googleResManService struct {
 	// account represents the Google cloud account that is used to make
 	// calls to Google cloud resource manager APIs.
-	account     *Account
+	account *Account
 	// service: represents an object that contains an http client that is
 	// used to make calls to Google cloud resource manager APIs.
 	service *googleresourcemanager.Service
@@ -790,4 +790,30 @@ func (svc *googleResManService) getProjectList() ([]*googleresourcemanager.Proje
 	}
 
 	return projectList.Projects, nil
+}
+
+// createImage creates a new image in Google cloud platform from a raw disk
+// image stored on Google Cloud Storage.
+func (svc *googleService) createImage() error {
+	image := &googlecloud.Image{
+		Name:        svc.vm.SourceImage,
+		Description: svc.vm.Description,
+		RawDisk: &googlecloud.ImageRawDisk{
+			Source: svc.vm.RawDiskSource,
+		},
+	}
+	op, err := svc.service.Images.Insert(svc.vm.Project, image).Do()
+	if err != nil {
+		return err
+	}
+	return svc.waitForGlobalOperationReady(op.Name)
+}
+
+// deleteImage deletes an image from Google cloud platform
+func (svc *googleService) deleteImage() error {
+	op, err := svc.service.Images.Delete(svc.vm.Project, svc.vm.SourceImage).Do()
+	if err != nil {
+		return err
+	}
+	return svc.waitForGlobalOperationReady(op.Name)
 }
