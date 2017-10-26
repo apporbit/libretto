@@ -464,6 +464,12 @@ type Lease interface {
 	Complete() error
 }
 
+type VirtualEthernetCard struct {
+	NetworkName string `json:"network_name"`
+	MacAddress  string `json:"mac_address"`
+	NicName     string `json:"nic_name"`
+}
+
 type VMInfo struct {
 	VMId               string
 	IpAddress          []net.IP
@@ -717,6 +723,23 @@ func (vm *VM) RemoveDisk(vmdkFiles []string) error {
 		return errors.New(errorMessage)
 	}
 	return nil
+}
+
+// getNicInfo returns the nic info of this VM.
+func getNicInfo(vmMo mo.VirtualMachine) []VirtualEthernetCard {
+	var nicInfo []VirtualEthernetCard
+	for _, dev := range vmMo.Config.Hardware.Device {
+		if c, ok := dev.(types.BaseVirtualEthernetCard); ok {
+			var nic VirtualEthernetCard
+			nwcard := c.GetVirtualEthernetCard()
+			nic.MacAddress = nwcard.MacAddress
+			nic.NicName = nwcard.DeviceInfo.GetDescription().Label
+			nic.NetworkName = nwcard.Backing.(*types.VirtualEthernetCardNetworkBackingInfo).DeviceName
+			nicInfo = append(nicInfo, nic)
+		}
+	}
+
+	return nicInfo
 }
 
 // GetIPsAndId returns the IPs and reference Id of this VM. Returns all the IPs known to the API for
@@ -1539,9 +1562,10 @@ func GetTemplateList(vm *VM) ([]map[string]interface{}, error) {
 					}
 				}
 				vmList = append(vmList, map[string]interface{}{
-					"name":  vmo.Name,
-					"id":    vmo.Self.Value,
-					"disks": diskInfo,
+					"name":     vmo.Name,
+					"id":       vmo.Self.Value,
+					"disks":    diskInfo,
+					"nic_info": getNicInfo(vmo),
 				})
 			}
 		}
