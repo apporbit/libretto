@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
@@ -29,6 +30,10 @@ import (
 
 	"github.com/apcera/libretto/util"
 	lvm "github.com/apcera/libretto/virtualmachine"
+)
+
+const (
+	RETRY_COUNT = 20
 )
 
 func StringInSlice(str string, list []string) bool {
@@ -847,6 +852,20 @@ var shutDown = func(vm *VM) error {
 	err = vmo.ShutdownGuest(vm.ctx)
 	if err != nil {
 		return fmt.Errorf("error initiating shutDown on the vm: %v", err)
+	}
+
+	state, err := getState(vm)
+	if err != nil {
+		return fmt.Errorf("Error getting state of vm : %v", err)
+	}
+	retry := RETRY_COUNT
+	for state != "notRunning" && retry > 0 {
+		state, _ = getState(vm)
+		time.Sleep(5 * time.Second)
+		retry--
+	}
+	if retry == 0 {
+		return fmt.Errorf("Shutting down vm: %s timed out", vm.Name)
 	}
 	return nil
 }

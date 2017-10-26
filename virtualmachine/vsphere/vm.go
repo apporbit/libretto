@@ -1617,7 +1617,7 @@ func ConvertToTemplate(vm *VM) error {
 		return fmt.Errorf("error getting the uploaded VM: %v", err)
 	}
 
-	err = halt(vm)
+	err = shutDown(vm)
 	if err != nil {
 		return fmt.Errorf("error halting the VM: %v", err)
 	}
