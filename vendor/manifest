@@ -5,18 +5,9 @@
 			"importpath": "cloud.google.com/go/compute/metadata",
 			"repository": "https://code.googlesource.com/gocloud",
 			"vcs": "git",
-			"revision": "bfdc39bde7a3c8dd361ea7fcdb69e7a41a475bb9",
+			"revision": "36dc44d65c859022eaa611ad10621be885d3643a",
 			"branch": "master",
 			"path": "/compute/metadata",
-			"notests": true
-		},
-		{
-			"importpath": "cloud.google.com/go/internal",
-			"repository": "https://code.googlesource.com/gocloud",
-			"vcs": "git",
-			"revision": "bfdc39bde7a3c8dd361ea7fcdb69e7a41a475bb9",
-			"branch": "master",
-			"path": "internal",
 			"notests": true
 		},
 		{
@@ -179,14 +170,6 @@
 			"notests": true
 		},
 		{
-			"importpath": "github.com/googleapis/gax-go",
-			"repository": "https://github.com/googleapis/gax-go",
-			"vcs": "git",
-			"revision": "da06d194a00e19ce00d9011a13931c3f6f6887c7",
-			"branch": "master",
-			"notests": true
-		},
-		{
 			"importpath": "github.com/jmespath/go-jmespath",
 			"repository": "https://github.com/jmespath/go-jmespath",
 			"vcs": "git",
@@ -318,15 +301,6 @@
 			"notests": true
 		},
 		{
-			"importpath": "golang.org/x/net/trace",
-			"repository": "https://go.googlesource.com/net",
-			"vcs": "git",
-			"revision": "6cdc0daab091c43fc46193327e0047b4f883c613",
-			"branch": "master",
-			"path": "trace",
-			"notests": true
-		},
-		{
 			"importpath": "golang.org/x/oauth2",
 			"repository": "https://go.googlesource.com/oauth2",
 			"vcs": "git",
@@ -368,14 +342,6 @@
 			"revision": "89c815feb645bf719a710e37089efe9f97d87dc8",
 			"branch": "master",
 			"path": "/googleapi",
-			"notests": true
-		},
-		{
-			"importpath": "google.golang.org/grpc",
-			"repository": "https://github.com/grpc/grpc-go",
-			"vcs": "git",
-			"revision": "708a7f9f3283aa2d4f6132d287d78683babe55c8",
-			"branch": "master",
 			"notests": true
 		},
 		{
