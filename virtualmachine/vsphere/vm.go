@@ -473,7 +473,7 @@ type VirtualEthernetCard struct {
 type VMInfo struct {
 	VMId               string
 	IpAddress          []net.IP
-	ToolsRunningStatus string
+	ToolsRunningStatus bool
 	OverallCpuUsage    int64
 	GuestMemoryUsage   int64
 	MaxCpuUsage        int32
@@ -877,6 +877,14 @@ func (vm *VM) Destroy() (err error) {
 	return nil
 }
 
+//getToolsRunningStatus returns ToolsRunningState as true/false
+func getToolsRunningStatus(status string) bool {
+	if string(types.VirtualMachineToolsRunningStatusGuestToolsRunning) == status {
+		return true
+	}
+	return false
+}
+
 //GetVMInfo returns information of this VM.
 func (vm *VM) GetVMInfo() (VMInfo, error) {
 	var vmInfo VMInfo
@@ -896,7 +904,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 	}
 
 	ips, vmid, err := vm.GetIPsAndId()
-	toolsRunningStatus := vmMo.Guest.ToolsRunningStatus
+	toolsRunningStatus := getToolsRunningStatus(vmMo.Guest.ToolsRunningStatus)
 
 	vmInfo.VMId = vmid
 	vmInfo.IpAddress = ips
