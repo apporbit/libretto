@@ -879,12 +879,10 @@ func (vm *VM) Destroy() (err error) {
 
 //getToolsRunningStatus returns ToolsRunningState as true/false
 func getToolsRunningStatus(status string) bool {
-	ret := false
 	if string(types.VirtualMachineToolsRunningStatusGuestToolsRunning) == status {
-		ret = true
+		return true
 	}
-	return ret
-
+	return false
 }
 
 //GetVMInfo returns information of this VM.
