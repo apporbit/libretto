@@ -71,7 +71,7 @@ type VM struct {
 	Firewall  string // required when modifying firewall rules
 	Endpoints []Endpoint
 
-	// RawDiskSource is the full Google Cloud Storage URL ere the raw disk
+	// RawDiskSource is the full Google Cloud Storage URL where the raw disk
 	// image is stored. It is required only for creating a new image from
 	// a raw disk.
 	RawDiskSource string
