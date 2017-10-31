@@ -480,6 +480,7 @@ type VMInfo struct {
 	MaxMemoryUsage     int32
 	NumCpu             int32
 	PowerState         string
+	MemorySizeMB       int32
 }
 
 type Flavor struct {
@@ -915,6 +916,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 	vmInfo.MaxMemoryUsage = vmMo.Runtime.MaxMemoryUsage
 	vmInfo.PowerState = string(vmMo.Runtime.PowerState)
 	vmInfo.NumCpu = vmMo.Summary.Config.NumCpu
+	vmInfo.MemorySizeMB = vmMo.Summary.Config.MemorySizeMB
 
 	return vmInfo, nil
 }
@@ -1374,7 +1376,7 @@ func getDcVMList(vm *VM, datacenter *object.Datacenter) ([]mo.VirtualMachine, er
 		vmsMor = append(vmsMor, vm.Reference())
 	}
 	// get the vm names and config
-	err = vm.collector.Retrieve(vm.ctx, vmsMor, []string{"name", "config"}, &allVmsMo)
+	err = vm.collector.Retrieve(vm.ctx, vmsMor, []string{"name", "config", "summary"}, &allVmsMo)
 	return allVmsMo, err
 }
 
@@ -1570,10 +1572,12 @@ func GetTemplateList(vm *VM) ([]map[string]interface{}, error) {
 					}
 				}
 				vmList = append(vmList, map[string]interface{}{
-					"name":     vmo.Name,
-					"id":       vmo.Self.Value,
-					"disks":    diskInfo,
-					"nic_info": getNicInfo(vmo),
+					"name":           vmo.Name,
+					"id":             vmo.Self.Value,
+					"disks":          diskInfo,
+					"nic_info":       getNicInfo(vmo),
+					"memory_size_mb": vmo.Summary.Config.MemorySizeMB,
+					"num_cpu":        vmo.Summary.Config.NumCpu,
 				})
 			}
 		}
@@ -1622,7 +1626,7 @@ func getVirtualMachines(vm *VM) ([]mo.VirtualMachine, error) {
 			return nil, err
 		}
 
-		err = vm.collector.Retrieve(vm.ctx, hsMo.Vm, []string{"name", "config"}, &virtualMachines)
+		err = vm.collector.Retrieve(vm.ctx, hsMo.Vm, []string{"name", "config", "summary"}, &virtualMachines)
 		if err != nil {
 			return nil, err
 		}
