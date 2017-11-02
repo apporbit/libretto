@@ -36,6 +36,21 @@ const (
 	RETRY_COUNT = 20
 )
 
+/*
+ * The guest heartbeat. The heartbeat status is classified as:
+ * gray - VMware Tools are not installed or not running.
+ * red - No heartbeat. Guest operating system may have stopped responding.
+ * yellow - Intermittent heartbeat. May be due to guest load.
+ * green - Guest operating system is responding normally.
+ */
+const (
+	GUEST_HEART_BEAT_STATUS = "guestHeartbeatStatus"
+	GREEN_HEART_BEAT        = 1 << iota
+	YELLOW_HEART_BEAT
+	GRAY_HEART_BEAT
+	RED_HEART_BEAT
+)
+
 func StringInSlice(str string, list []string) bool {
 	for _, v := range list {
 		if v == str {
@@ -870,6 +885,43 @@ var shutDown = func(vm *VM) error {
 	return nil
 }
 
+// WaitForGuestStatus: wait for guest vm status to turn to either of the
+// statuses sent as 'status'
+func WaitForGuestStatus(vm *VM, vmMo *mo.VirtualMachine, status int) error {
+	collector := property.DefaultCollector(vm.client.Client)
+	err := property.Wait(vm.ctx, collector, vmMo.Reference(), []string{
+		GUEST_HEART_BEAT_STATUS}, func(pc []types.PropertyChange) bool {
+		for _, c := range pc {
+			if c.Name != GUEST_HEART_BEAT_STATUS {
+				continue
+			}
+			if c.Val == nil {
+				continue
+			}
+
+			ps := c.Val.(types.ManagedEntityStatus)
+			if status&GREEN_HEART_BEAT != 0 &&
+				ps == types.ManagedEntityStatusGreen {
+				return true
+			}
+			if status&GRAY_HEART_BEAT != 0 &&
+				ps == types.ManagedEntityStatusGray {
+				return true
+			}
+			if status&YELLOW_HEART_BEAT != 0 &&
+				ps == types.ManagedEntityStatusYellow {
+				return true
+			}
+			if status&RED_HEART_BEAT != 0 &&
+				ps == types.ManagedEntityStatusRed {
+				return true
+			}
+		}
+		return false
+	})
+	return err
+}
+
 // restart Initiates guest reboot of this VM.
 var restart = func(vm *VM) error {
 	// Get a reference to the datacenter with host and vm folders populated
@@ -885,6 +937,16 @@ var restart = func(vm *VM) error {
 	err = vmo.RebootGuest(vm.ctx)
 	if err != nil {
 		return fmt.Errorf("error initiating reboot on the vm: %v", err)
+	}
+	// wait for machine to shutdown - status will turn to gray
+	err = WaitForGuestStatus(vm, vmMo, GRAY_HEART_BEAT)
+	if err != nil {
+		return fmt.Errorf("error wating for vm to reboot : %v", err)
+	}
+	// wait for machine to come up again - status will turn to green
+	err = WaitForGuestStatus(vm, vmMo, GREEN_HEART_BEAT|YELLOW_HEART_BEAT)
+	if err != nil {
+		return fmt.Errorf("error wating for vm to boot up: %v", err)
 	}
 	return nil
 }
@@ -934,9 +996,14 @@ var reset = func(vm *VM) error {
 		return err
 	}
 	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
+	toolsRunning, err := vmo.IsToolsRunning(vm.ctx)
+	if err != nil {
+		return fmt.Errorf("Error checking status of tools : %v", err)
+	}
 	resetTask, err := vmo.Reset(vm.ctx)
 	if err != nil {
-		return fmt.Errorf("error creating a reset task on the vm: %v", err)
+		return fmt.Errorf("error creating a reset task on the vm: %v",
+			err)
 	}
 	tInfo, err := resetTask.WaitForResult(vm.ctx, nil)
 	if err != nil {
@@ -944,6 +1011,22 @@ var reset = func(vm *VM) error {
 	}
 	if tInfo.Error != nil {
 		return fmt.Errorf("reset task returned an error: %v", err)
+	}
+	// wait for machine to reset - status will turn to red
+	if toolsRunning {
+		err = WaitForGuestStatus(vm, vmMo, RED_HEART_BEAT)
+		if err != nil {
+			return fmt.Errorf("error wating for vm to reset : %v",
+				err)
+		}
+		// wait for machine to come up after reset - status will turn to
+		// green/yellow
+		err = WaitForGuestStatus(vm, vmMo,
+			GREEN_HEART_BEAT|YELLOW_HEART_BEAT)
+		if err != nil {
+			return fmt.Errorf("error wating for vm to reset : %v",
+				err)
+		}
 	}
 	return nil
 }
