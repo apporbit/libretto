@@ -1099,11 +1099,13 @@ func DeleteTemplate(vm *VM) error {
 // GetDatastores : Returns the datastores in a host/cluster in a cluster
 func GetDatastores(vm *VM) ([]Datastore, error) {
 	var (
-		datastore     mo.Datastore
-		hsMo          mo.HostSystem
-		datastoreList []Datastore
-		dsMoList      []types.ManagedObjectReference
+		datastore mo.Datastore
+		hsMo      mo.HostSystem
+		dsMoList  []types.ManagedObjectReference
 	)
+
+	datastoreList := []Datastore{}
+
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
