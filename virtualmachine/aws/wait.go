@@ -139,3 +139,131 @@ func waitUntilReady(svc *ec2.EC2, instanceID string) error {
 
 	return rerr
 }
+
+// waitUntilStopped: waits until vm is stopped
+func waitUntilStopped(svc *ec2.EC2, instanceID string) error {
+	// With 10 retries, total timeout is about 17 minutes.
+	const maxRetries = 10
+
+	var instanceStatus *InstanceStatus
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		// Sleep will be 1, 2, 4, 8, 16...
+		// time.Sleep(2ⁱ * time.Second)
+		time.Sleep(time.Duration(math.Exp2(float64(i))) * time.Second)
+
+		instanceStatus, err = GetInstanceStatus(svc, instanceID)
+		if err != nil {
+			continue
+		}
+		state := instanceStatus.State
+		switch state {
+		case ec2.InstanceStateNameStopped:
+			return nil
+		case ec2.InstanceStateNameTerminated, ec2.InstanceStateNameShuttingDown:
+			// Polling is useless. This instance is teminated or teminating.
+			// Break the loop.
+			i = maxRetries
+		}
+	}
+
+	return fmt.Errorf("Wait until stopped timeout")
+}
+
+// waitUntilRunning: waits until vm is running
+func waitUntilRunning(svc *ec2.EC2, instanceID string) error {
+	// With 10 retries, total timeout is about 17 minutes.
+	const maxRetries = 10
+
+	var instanceStatus *InstanceStatus
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		// Sleep will be 1, 2, 4, 8, 16...
+		// time.Sleep(2ⁱ * time.Second)
+		time.Sleep(time.Duration(math.Exp2(float64(i))) * time.Second)
+
+		instanceStatus, err = GetInstanceStatus(svc, instanceID)
+		if err != nil {
+			continue
+		}
+		state := instanceStatus.State
+		switch state {
+		case ec2.InstanceStateNameRunning:
+			return nil
+		case ec2.InstanceStateNameTerminated, ec2.InstanceStateNameShuttingDown:
+			// Polling is useless. This instance is teminated or teminating.
+			// Break the loop.
+			i = maxRetries
+		}
+	}
+
+	return fmt.Errorf("Wait until running timeout")
+}
+
+// waitUntilTerminated: waits until vm is terminated
+func waitUntilTerminated(svc *ec2.EC2, instanceID string) error {
+	// With 10 retries, total timeout is about 17 minutes.
+	const maxRetries = 10
+	var instanceStatus *InstanceStatus
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		// Sleep will be 1, 2, 4, 8, 16...
+		// time.Sleep(2ⁱ * time.Second)
+		time.Sleep(time.Duration(math.Exp2(float64(i))) * time.Second)
+
+		instanceStatus, err = GetInstanceStatus(svc, instanceID)
+		if err != nil {
+			continue
+		}
+
+		state := instanceStatus.State
+		if state == ec2.InstanceStateNameTerminated {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("Wait until terminated timeout")
+}
+
+// waitUntiVolumeReady: waits for volume to get ready
+func waitUntilVolumeReady(svc *ec2.EC2, volumeID string) error {
+	// With 5 retries, total timeout is about 31 seconds.
+	const maxRetries = 5
+
+	var resp *ec2.DescribeVolumesOutput
+	var err error
+
+	for i := 0; i < maxRetries; i++ {
+		// Sleep will be 1, 2, 4, 8, 16...
+		// time.Sleep(2ⁱ * time.Second)
+		time.Sleep(time.Duration(math.Exp2(float64(i))) * time.Second)
+
+		resp, err = svc.DescribeVolumes(&ec2.DescribeVolumesInput{
+			VolumeIds: []*string{&volumeID},
+		})
+		if err != nil {
+			continue
+		}
+
+		if len(resp.Volumes) < 1 {
+			continue
+		}
+		if resp.Volumes[0].State == nil {
+			continue
+		}
+		state := *resp.Volumes[0].State
+		if state == ec2.VolumeStateAvailable {
+			// volume is ready
+			return nil
+		}
+	}
+
+	if err != nil {
+		return fmt.Errorf("Error in getting volume state: %v", err)
+	}
+
+	return fmt.Errorf("Wait until volume ready timeout")
+}

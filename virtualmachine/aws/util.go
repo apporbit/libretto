@@ -191,14 +191,14 @@ func instanceInfo(vm *VM) *ec2.RunInstancesInput {
 	if len(vm.SecurityGroups) > 0 {
 		sgid = make([]*string, 0)
 		for _, sg := range vm.SecurityGroups {
-			sgid = append(sgid, aws.String(sg))
+			sgid = append(sgid, aws.String(sg.Id))
 		}
 	}
 
 	devices := make([]*ec2.BlockDeviceMapping, len(vm.Volumes))
 	for _, volume := range vm.Volumes {
-		if volume.VolumeSize == 0 {
-			volume.VolumeSize = defaultVolumeSize
+		if volume.VolumeSize == new(int64) {
+			volume.VolumeSize = aws.Int64(int64(defaultVolumeSize))
 		}
 		if volume.VolumeType == "" {
 			volume.VolumeType = defaultVolumeType
@@ -207,7 +207,7 @@ func instanceInfo(vm *VM) *ec2.RunInstancesInput {
 		devices = append(devices, &ec2.BlockDeviceMapping{
 			DeviceName: aws.String(volume.DeviceName),
 			Ebs: &ec2.EbsBlockDevice{
-				VolumeSize:          aws.Int64(int64(volume.VolumeSize)),
+				VolumeSize:          volume.VolumeSize,
 				VolumeType:          aws.String(volume.VolumeType),
 				DeleteOnTermination: aws.Bool(!vm.KeepRootVolumeOnDestroy),
 			},
@@ -287,4 +287,106 @@ func DeleteKeyPair(name string, region string) error {
 	}
 
 	return nil
+}
+
+// GetInstanceStatus: returns status of given instances
+// Status includes availabilityZone & state
+func GetInstanceStatus(svc *ec2.EC2, instID string) (*InstanceStatus, error) {
+	input := &ec2.DescribeInstanceStatusInput{
+		IncludeAllInstances: func(val bool) *bool { return &val }(true),
+		InstanceIds:         []*string{&instID}}
+	statusOutput, err := svc.DescribeInstanceStatus(input)
+
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get instance status: %v", err)
+	}
+
+	instanceStatus := statusOutput.InstanceStatuses[0]
+	status := &InstanceStatus{
+		AvailabilityZone: *instanceStatus.AvailabilityZone,
+		InstanceId:       *instanceStatus.InstanceId,
+		State:            *instanceStatus.InstanceState.Name}
+
+	return status, nil
+}
+
+// GetFilters: converts filter map to array of pointers to ec2.Filter objects
+func GetFilters(filterMap map[string][]*string) []*ec2.Filter {
+	filters := make([]*ec2.Filter, 0)
+	for key, values := range filterMap {
+		filters = append(filters, &ec2.Filter{
+			Name:   &key,
+			Values: values})
+	}
+	return filters
+}
+
+// ToEc2IpPermissions: converts array of IpPermission objects to
+// array of pointer to ec2.IpPermission
+func ToEc2IpPermissions(ipPermissions []IpPermission) []*ec2.IpPermission {
+	ec2IpPermissions := make([]*ec2.IpPermission, 0)
+	for _, ipPermission := range ipPermissions {
+		ec2IpPermission := &ec2.IpPermission{
+			FromPort:   ipPermission.FromPort,
+			ToPort:     ipPermission.ToPort,
+			IpProtocol: &ipPermission.IpProtocol}
+
+		if ipPermission.Ipv4Ranges != nil && len(ipPermission.Ipv4Ranges) > 0 {
+			ipRanges := make([]*ec2.IpRange, 0)
+			for _, ipv4Range := range ipPermission.Ipv4Ranges {
+				ipRanges = append(ipRanges, &ec2.IpRange{
+					CidrIp: &ipv4Range})
+			}
+			ec2IpPermission.IpRanges = ipRanges
+		} else {
+			ipv6Ranges := make([]*ec2.Ipv6Range, 0)
+			for _, ipv6Range := range ipPermission.Ipv6Ranges {
+				ipv6Ranges = append(ipv6Ranges, &ec2.Ipv6Range{
+					CidrIpv6: &ipv6Range})
+			}
+			ec2IpPermission.Ipv6Ranges = ipv6Ranges
+		}
+		ec2IpPermissions = append(ec2IpPermissions, ec2IpPermission)
+	}
+	return ec2IpPermissions
+}
+
+// ToVMAWSIpPermissions: converts array of ec2.IpPermission to
+// array of local IpPermission struct object
+func ToVMAWSIpPermissions(ec2IpPermissions []*ec2.IpPermission) []IpPermission {
+	ipPermissions := make([]IpPermission, 0)
+	for _, ipPermission := range ec2IpPermissions {
+		ipv4ranges := make([]string, 0)
+		for _, ipv4range := range ipPermission.IpRanges {
+			ipv4ranges = append(ipv4ranges, *ipv4range.CidrIp)
+		}
+		ipv6ranges := make([]string, 0)
+		for _, ipv6range := range ipPermission.Ipv6Ranges {
+			ipv6ranges = append(ipv6ranges, *ipv6range.CidrIpv6)
+		}
+		ipPermissions = append(ipPermissions, IpPermission{
+			FromPort:   ipPermission.FromPort,
+			ToPort:     ipPermission.ToPort,
+			IpProtocol: *ipPermission.IpProtocol,
+			Ipv4Ranges: ipv4ranges,
+			Ipv6Ranges: ipv6ranges})
+	}
+	return ipPermissions
+}
+
+// GetVolumeInput: returns input for create volume operation
+func GetVolumeInput(volume *EbsBlockVolume) *ec2.CreateVolumeInput {
+	if volume.VolumeSize == nil {
+		defaultSize := int64(defaultVolumeSize)
+		volume.VolumeSize = &defaultSize
+	}
+	if volume.VolumeType == "" {
+		volume.VolumeType = defaultVolumeType
+	}
+	input := &ec2.CreateVolumeInput{
+		AvailabilityZone: &volume.AvailabilityZone,
+		Size:             volume.VolumeSize,
+		VolumeType:       &volume.VolumeType,
+	}
+	return input
 }
