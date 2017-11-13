@@ -11,6 +11,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -470,6 +471,13 @@ type VirtualEthernetCard struct {
 	NicName     string `json:"nic_name"`
 }
 
+type DiskInfo struct {
+	DiskName        string
+	Controller      string
+	ThinProvisioned bool
+	Size            int64
+}
+
 type VMInfo struct {
 	VMId               string
 	IpAddress          []net.IP
@@ -481,6 +489,7 @@ type VMInfo struct {
 	NumCpu             int32
 	PowerState         string
 	MemorySizeMB       int32
+	DisksInfo          []DiskInfo
 }
 
 type Flavor struct {
@@ -886,6 +895,30 @@ func getToolsRunningStatus(status string) bool {
 	return false
 }
 
+//getDisksInfo  returns the disks info of this VM.
+func getDisksInfo(vmMo mo.VirtualMachine) []DiskInfo {
+	var disksInfo []DiskInfo
+	devices := object.VirtualDeviceList(vmMo.Config.Hardware.Device)
+	for _, device := range devices {
+		if disk, ok := device.(*types.VirtualDisk); ok {
+			if c := devices.FindByKey(disk.ControllerKey); c != nil {
+				controller := c.GetVirtualDevice().DeviceInfo.GetDescription().Label
+				if disk.UnitNumber != nil {
+					controller = controller + ":" + strconv.Itoa(int(*disk.UnitNumber))
+				}
+				var diskInfo DiskInfo
+				diskInfo.Controller = controller
+				diskInfo.DiskName = disk.Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
+				diskInfo.ThinProvisioned = *(disk.Backing.(*types.VirtualDiskFlatVer2BackingInfo)).ThinProvisioned
+				diskInfo.Size = disk.CapacityInBytes
+				disksInfo = append(disksInfo, diskInfo)
+			}
+		}
+
+	}
+	return disksInfo
+}
+
 //GetVMInfo returns information of this VM.
 func (vm *VM) GetVMInfo() (VMInfo, error) {
 	var vmInfo VMInfo
@@ -917,7 +950,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 	vmInfo.PowerState = string(vmMo.Runtime.PowerState)
 	vmInfo.NumCpu = vmMo.Summary.Config.NumCpu
 	vmInfo.MemorySizeMB = vmMo.Summary.Config.MemorySizeMB
-
+	vmInfo.DisksInfo = getDisksInfo(*vmMo)
 	return vmInfo, nil
 }
 
