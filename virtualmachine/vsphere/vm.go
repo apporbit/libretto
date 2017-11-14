@@ -899,17 +899,27 @@ func getToolsRunningStatus(status string) bool {
 func getDisksInfo(vmMo mo.VirtualMachine) []DiskInfo {
 	var disksInfo []DiskInfo
 	devices := object.VirtualDeviceList(vmMo.Config.Hardware.Device)
+	deviceKeyMap := make(map[int32]types.BaseVirtualDevice)
 	for _, device := range devices {
 		if disk, ok := device.(*types.VirtualDisk); ok {
-			if c := devices.FindByKey(disk.ControllerKey); c != nil {
+			//Find out the device using key try to search in map first
+			//If not found then try to search in device list
+			c, present := deviceKeyMap[disk.ControllerKey]
+			if !present {
+				c = devices.FindByKey(disk.ControllerKey)
+				deviceKeyMap[disk.ControllerKey] = c
+			}
+			if c != nil {
 				controller := c.GetVirtualDevice().DeviceInfo.GetDescription().Label
 				if disk.UnitNumber != nil {
 					controller = controller + ":" + strconv.Itoa(int(*disk.UnitNumber))
 				}
 				var diskInfo DiskInfo
 				diskInfo.Controller = controller
-				diskInfo.DiskName = disk.Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
-				diskInfo.ThinProvisioned = *(disk.Backing.(*types.VirtualDiskFlatVer2BackingInfo)).ThinProvisioned
+				backing := disk.Backing
+				fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
+				diskInfo.DiskName = fileBackingInfo.FileName
+				diskInfo.ThinProvisioned = *(backing.(*types.VirtualDiskFlatVer2BackingInfo)).ThinProvisioned
 				diskInfo.Size = disk.CapacityInBytes
 				disksInfo = append(disksInfo, diskInfo)
 			}
