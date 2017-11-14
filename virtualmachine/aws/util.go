@@ -298,7 +298,8 @@ func GetInstanceStatus(svc *ec2.EC2, instID string) (*InstanceStatus, error) {
 	statusOutput, err := svc.DescribeInstanceStatus(input)
 
 	if err != nil {
-		return nil, fmt.Errorf("Failed to get instance status: %v", err)
+		return nil, fmt.Errorf("Failed to get instance (instanceId %s) "+
+			"status: %v", instID, err)
 	}
 
 	instanceStatus := statusOutput.InstanceStatuses[0]

@@ -689,7 +689,8 @@ func (vm *VM) CreateVolume() error {
 		return fmt.Errorf("Failed to create volume: %v", err)
 	}
 
-	if err := waitUntilVolumeReady(svc, *response.VolumeId); err != nil {
+	if err := waitUntilVolumeState(svc, *response.VolumeId,
+		ec2.VolumeStateAvailable); err != nil {
 		return err
 	}
 
@@ -713,7 +714,13 @@ func (vm *VM) AttachVolume() error {
 		VolumeId:   &volume.VolumeId}
 	_, err = svc.AttachVolume(input)
 	if err != nil {
-		return fmt.Errorf("Failed to attach volume: %v", err)
+		return fmt.Errorf("Failed to attach volume (volumeId %s) to "+
+			"instance (instanceId %s): %v", volume.VolumeId, err)
+	}
+
+	if err := waitUntilVolumeState(svc, volume.VolumeId,
+		ec2.VolumeStateInUse); err != nil {
+		return err
 	}
 
 	return nil
@@ -731,10 +738,12 @@ func (vm *VM) DetachVolume() error {
 		VolumeId: &volume.VolumeId}
 	_, err = svc.DetachVolume(input)
 	if err != nil {
-		return fmt.Errorf("Failed to detach volume: %v", err)
+		return fmt.Errorf("Failed to detach volume (volumeId %s) from "+
+			"instance (instanceId %s): %v", volume.VolumeId, err)
 	}
 
-	if err := waitUntilVolumeReady(svc, volume.VolumeId); err != nil {
+	if err := waitUntilVolumeState(svc, volume.VolumeId,
+		ec2.VolumeStateAvailable); err != nil {
 		return err
 	}
 
@@ -754,7 +763,8 @@ func (vm *VM) DeleteVolume() error {
 		VolumeId: &volume.VolumeId}
 	_, err = svc.DeleteVolume(input)
 	if err != nil {
-		return fmt.Errorf("Failed to delete volume: %v", err)
+		return fmt.Errorf("Failed to delete volume (volumeId %s): %v",
+			volume.VolumeId, err)
 	}
 
 	return nil
