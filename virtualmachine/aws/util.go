@@ -391,3 +391,37 @@ func GetVolumeInput(volume *EbsBlockVolume) *ec2.CreateVolumeInput {
 	}
 	return input
 }
+
+// GetVMAWSImage: returns local Image struct object for given ec2.Image
+func GetVMAWSImage(image *ec2.Image) Image {
+	ebsVolumes := make([]*EbsBlockVolume, 0)
+	for _, blockDeviceMapping := range image.BlockDeviceMappings {
+		ebsVolume := &EbsBlockVolume{
+			DeviceName: *blockDeviceMapping.DeviceName}
+		if blockDeviceMapping.Ebs != nil {
+			ebsVolume.VolumeSize = blockDeviceMapping.Ebs.VolumeSize
+			ebsVolume.VolumeType = *blockDeviceMapping.Ebs.VolumeType
+		}
+		ebsVolumes = append(ebsVolumes, ebsVolume)
+	}
+	img := Image{
+		Id:                 image.ImageId,
+		Name:               image.Name,
+		Description:        image.Description,
+		State:              image.State,
+		OwnerId:            image.OwnerId,
+		OwnerAlias:         image.ImageOwnerAlias,
+		CreationDate:       image.CreationDate,
+		Architecture:       image.Architecture,
+		Platform:           image.Platform,
+		Hypervisor:         image.Hypervisor,
+		VirtualizationType: image.VirtualizationType,
+		ImageType:          image.ImageType,
+		KernelId:           image.KernelId,
+		RootDeviceName:     image.RootDeviceName,
+		RootDeviceType:     image.RootDeviceType,
+		Public:             image.Public,
+		EbsVolumes:         ebsVolumes}
+
+	return img
+}

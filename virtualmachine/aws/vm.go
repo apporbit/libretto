@@ -173,6 +173,27 @@ type EbsBlockVolume struct {
 	SnapshotId       string `json:"snapshot_id,omitempty"`
 }
 
+// Image represents a AWS Image
+type Image struct {
+	Id                 *string           `json:"id,omitempty"`
+	Name               *string           `json:"name,omitempty"`
+	Description        *string           `json:"description,omitempty"`
+	State              *string           `json:"state,omitempty"`
+	OwnerId            *string           `json:"owner_id,omitempty"`
+	OwnerAlias         *string           `json:"owner_alias,omitempty"`
+	CreationDate       *string           `json:"creation_date,omitempty"`
+	Architecture       *string           `json:"architecture,omitempty"`
+	Platform           *string           `json:"platform,omitempty"`
+	Hypervisor         *string           `json:"hypervisor,omitempty"`
+	VirtualizationType *string           `json:"virtualization_type,omitempty"`
+	ImageType          *string           `json:"image_type,omitempty"`
+	KernelId           *string           `json:"kernel_id,omitemtpy"`
+	RootDeviceName     *string           `json:"root_device_name,omitempty"`
+	RootDeviceType     *string           `json:"root_device_type,omitempty"`
+	Public             *bool             `json:"public,omitempty"`
+	EbsVolumes         []*EbsBlockVolume `json:"ebs_volumes,omitempty"`
+}
+
 // GetName returns the name of the virtual machine
 func (vm *VM) GetName() string {
 	return vm.Name
@@ -606,6 +627,32 @@ func (vm *VM) GetSecurityGroupList(filter map[string][]*string) ([]SecurityGroup
 	return response, nil
 }
 
+// GetImageList: returns list of images available for given account
+// Includes public,owned private images & private images with explicit permission
+func (vm *VM) GetImageList(filter map[string][]*string) ([]Image, error) {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	filters := GetFilters(filter)
+
+	input := &ec2.DescribeImagesInput{
+		Filters: filters}
+
+	imageListOutput, err := svc.DescribeImages(input)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get Image list: %v", err)
+	}
+
+	response := make([]Image, 0)
+	for _, image := range imageListOutput.Images {
+		img := GetVMAWSImage(image)
+		response = append(response, img)
+	}
+	return response, nil
+}
+
 // AuthorizeSecurityGroup: Adds one or more rules to a security group
 func (vm *VM) AuthorizeSecurityGroup() error {
 	svc, err := getService(vm.Region)
@@ -689,8 +736,7 @@ func (vm *VM) CreateVolume() error {
 		return fmt.Errorf("Failed to create volume: %v", err)
 	}
 
-	if err := waitUntilVolumeState(svc, *response.VolumeId,
-		ec2.VolumeStateAvailable); err != nil {
+	if err := waitForCreate(svc, *response.VolumeId); err != nil {
 		return err
 	}
 
@@ -718,8 +764,7 @@ func (vm *VM) AttachVolume() error {
 			"instance (instanceId %s): %v", volume.VolumeId, err)
 	}
 
-	if err := waitUntilVolumeState(svc, volume.VolumeId,
-		ec2.VolumeStateInUse); err != nil {
+	if err := waitForAttach(svc, volume.VolumeId); err != nil {
 		return err
 	}
 
@@ -742,8 +787,7 @@ func (vm *VM) DetachVolume() error {
 			"instance (instanceId %s): %v", volume.VolumeId, err)
 	}
 
-	if err := waitUntilVolumeState(svc, volume.VolumeId,
-		ec2.VolumeStateAvailable); err != nil {
+	if err := waitForDetach(svc, volume.VolumeId); err != nil {
 		return err
 	}
 

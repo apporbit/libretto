@@ -159,99 +159,95 @@ func waitUntilReady(svc *ec2.EC2, instanceID string) error {
 
 // waitUntilStopped: waits until vm is stopped
 func waitUntilStopped(svc *ec2.EC2, instanceID string) error {
-	const maxRetries = VmOpsTimeout / VmOpsInterval
+	matchBreakState := make(map[string]bool)
 
-	var instanceStatus *InstanceStatus
-	var err error
+	matchBreakState[ec2.InstanceStateNameStopped] = true
+	matchBreakState[ec2.InstanceStateNameTerminated] = false
+	matchBreakState[ec2.InstanceStateNameShuttingDown] = false
 
-	for ii := 0; ii < maxRetries; ii++ {
-		// Sleep will be VmOpsInterval, 2*VmOpsInterval, 3*VmOpsInterval, ...
-		time.Sleep(time.Duration(VmOpsInterval*(ii+1)) * time.Second)
-
-		instanceStatus, err = GetInstanceStatus(svc, instanceID)
-		if err != nil {
-			continue
-		}
-		state := instanceStatus.State
-		switch state {
-		case ec2.InstanceStateNameStopped:
-			return nil
-		case ec2.InstanceStateNameTerminated, ec2.InstanceStateNameShuttingDown:
-			// Polling is useless. This instance is terminated or terminating.
-			// Break the loop.
-			return fmt.Errorf("Instance unexpectedly terminating " +
-				"or has terminated")
-		}
-	}
-
-	return fmt.Errorf("Timeout while waiting for VM to be stopped")
+	return waitUntilState(svc, instanceID, matchBreakState)
 }
 
 // waitUntilRunning: waits until vm is running
 func waitUntilRunning(svc *ec2.EC2, instanceID string) error {
-	const maxRetries = VmOpsTimeout / VmOpsInterval
+	matchBreakState := make(map[string]bool)
 
-	var instanceStatus *InstanceStatus
-	var err error
+	matchBreakState[ec2.InstanceStateNameRunning] = true
+	matchBreakState[ec2.InstanceStateNameTerminated] = false
+	matchBreakState[ec2.InstanceStateNameShuttingDown] = false
 
-	for ii := 0; ii < maxRetries; ii++ {
-		// Sleep will be VmOpsInterval, 2*VmOpsInterval, 3*VmOpsInterval, ...
-		time.Sleep(time.Duration(VmOpsInterval*(ii+1)) * time.Second)
-
-		instanceStatus, err = GetInstanceStatus(svc, instanceID)
-		if err != nil {
-			continue
-		}
-		state := instanceStatus.State
-		switch state {
-		case ec2.InstanceStateNameRunning:
-			return nil
-		case ec2.InstanceStateNameTerminated, ec2.InstanceStateNameShuttingDown:
-			// Polling is useless. This instance is terminated or terminating.
-			// Break the loop.
-			return fmt.Errorf("Instance unexpectedly terminating " +
-				"or has terminated")
-		}
-	}
-
-	return fmt.Errorf("Timeout while waiting for VM to be in running state")
+	return waitUntilState(svc, instanceID, matchBreakState)
 }
 
 // waitUntilTerminated: waits until vm is terminated
 func waitUntilTerminated(svc *ec2.EC2, instanceID string) error {
-	const maxRetries = VmOpsTimeout / VmOpsInterval
+	matchBreakState := make(map[string]bool)
 
+	matchBreakState[ec2.InstanceStateNameTerminated] = true
+
+	return waitUntilState(svc, instanceID, matchBreakState)
+}
+
+// waitUntilState: waits until vm is in given state
+func waitUntilState(svc *ec2.EC2, instanceID string,
+	matchBreakState map[string]bool) error {
 	var instanceStatus *InstanceStatus
 	var err error
 
+	const maxRetries = VmOpsTimeout / VmOpsInterval
 	for ii := 0; ii < maxRetries; ii++ {
 		// Sleep will be VmOpsInterval, 2*VmOpsInterval, 3*VmOpsInterval, ...
-		time.Sleep(time.Duration(VmOpsInterval*(ii+1)) * time.Second)
+		time.Sleep(time.Duration(VmOpsInterval) * time.Second)
 
 		instanceStatus, err = GetInstanceStatus(svc, instanceID)
 		if err != nil {
 			continue
 		}
-
 		state := instanceStatus.State
-		if state == ec2.InstanceStateNameTerminated {
-			return nil
+
+		if val, ok := matchBreakState[state]; ok {
+			if val {
+				// true val means its state to be matched
+				return nil
+			}
+			// false val means an unexpected state has reached
+			// Polling is useless. So return appropriate error
+			return fmt.Errorf("Instance unexpectedly %s", state)
 		}
 	}
 
-	return fmt.Errorf("Timeout while waiting VM to be terminated")
+	for state, val := range matchBreakState {
+		if val {
+			return fmt.Errorf("Timeout while waiting for VM to be %s", state)
+		}
+	}
+	return fmt.Errorf("No match state given")
+}
+
+// waitForCreate: waits for volume to get created
+func waitForCreate(svc *ec2.EC2, volumeID string) error {
+	return waitUntilVolumeState(svc, volumeID, ec2.VolumeStateAvailable)
+}
+
+// waitForAttach: waits for volume to attach to a instance
+func waitForAttach(svc *ec2.EC2, volumeID string) error {
+	return waitUntilVolumeState(svc, volumeID, ec2.VolumeStateInUse)
+}
+
+// waitForDetach: waits for volume to detach from a instance
+func waitForDetach(svc *ec2.EC2, volumeID string) error {
+	return waitUntilVolumeState(svc, volumeID, ec2.VolumeStateAvailable)
 }
 
 // waitUntiVolumeState: waits for volume to get to state given as argument
 func waitUntilVolumeState(svc *ec2.EC2, volumeID string, stateEnum string) error {
-	const maxRetries = VolTimeout / VolInterval
-
 	var resp *ec2.DescribeVolumesOutput
 	var err error
 
+	const maxRetries = VolTimeout / VolInterval
 	for ii := 0; ii < maxRetries; ii++ {
 		// Sleep will be VolInterval, 2*VolInterval, 3*VolInterval, ...
-		time.Sleep(time.Duration(VolInterval*(ii+1)) * time.Second)
+		time.Sleep(time.Duration(VolInterval) * time.Second)
 
 		resp, err = svc.DescribeVolumes(&ec2.DescribeVolumesInput{
 			VolumeIds: []*string{&volumeID},
