@@ -410,6 +410,7 @@ type Disk struct {
 	Controller   string
 	Provisioning string
 	Datastore    string
+	DiskName     string
 }
 
 // Snapshot represents a vSphere snapshot to create
@@ -471,13 +472,6 @@ type VirtualEthernetCard struct {
 	NicName     string `json:"nic_name"`
 }
 
-type DiskInfo struct {
-	DiskName        string
-	Controller      string
-	ThinProvisioned bool
-	Size            int64
-}
-
 type VMInfo struct {
 	VMId               string
 	IpAddress          []net.IP
@@ -489,7 +483,7 @@ type VMInfo struct {
 	NumCpu             int32
 	PowerState         string
 	MemorySizeMB       int32
-	DisksInfo          []DiskInfo
+	DisksInfo          []Disk
 }
 
 type Flavor struct {
@@ -896,8 +890,8 @@ func getToolsRunningStatus(status string) bool {
 }
 
 //getDisksInfo  returns the disks info of this VM.
-func getDisksInfo(vmMo mo.VirtualMachine) []DiskInfo {
-	var disksInfo []DiskInfo
+func getDisksInfo(vmMo mo.VirtualMachine) []Disk {
+	var disksInfo []Disk
 	devices := object.VirtualDeviceList(vmMo.Config.Hardware.Device)
 	deviceKeyMap := make(map[int32]types.BaseVirtualDevice)
 	for _, device := range devices {
@@ -914,12 +908,16 @@ func getDisksInfo(vmMo mo.VirtualMachine) []DiskInfo {
 				if disk.UnitNumber != nil {
 					controller = controller + ":" + strconv.Itoa(int(*disk.UnitNumber))
 				}
-				var diskInfo DiskInfo
+				var diskInfo Disk
 				diskInfo.Controller = controller
 				backing := disk.Backing
 				fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
 				diskInfo.DiskName = fileBackingInfo.FileName
-				diskInfo.ThinProvisioned = *(backing.(*types.VirtualDiskFlatVer2BackingInfo)).ThinProvisioned
+				if *(backing.(*types.VirtualDiskFlatVer2BackingInfo)).ThinProvisioned {
+					diskInfo.Provisioning = "thin"
+				} else {
+					diskInfo.Provisioning = "thick"
+				}
 				diskInfo.Size = disk.CapacityInBytes
 				disksInfo = append(disksInfo, diskInfo)
 			}
