@@ -194,9 +194,21 @@ func waitUntilState(svc *ec2.EC2, instanceID string,
 	var instanceStatus *InstanceStatus
 	var err error
 
+	matchState := ""
+	for state, val := range matchBreakState {
+		if val {
+			matchState = state
+		}
+	}
+
+	if matchState == "" {
+		err = fmt.Errorf("No valid match state given for wait")
+		panic(err)
+	}
+
 	const maxRetries = VmOpsTimeout / VmOpsInterval
 	for ii := 0; ii < maxRetries; ii++ {
-		// Sleep will be VmOpsInterval, 2*VmOpsInterval, 3*VmOpsInterval, ...
+		// Sleep will be VmOpsInterval seconds
 		time.Sleep(time.Duration(VmOpsInterval) * time.Second)
 
 		instanceStatus, err = GetInstanceStatus(svc, instanceID)
@@ -216,12 +228,7 @@ func waitUntilState(svc *ec2.EC2, instanceID string,
 		}
 	}
 
-	for state, val := range matchBreakState {
-		if val {
-			return fmt.Errorf("Timeout while waiting for VM to be %s", state)
-		}
-	}
-	return fmt.Errorf("No match state given")
+	return fmt.Errorf("Timeout while waiting for VM to be %s", matchState)
 }
 
 // waitForCreate: waits for volume to get created
@@ -246,7 +253,7 @@ func waitUntilVolumeState(svc *ec2.EC2, volumeID string, stateEnum string) error
 
 	const maxRetries = VolTimeout / VolInterval
 	for ii := 0; ii < maxRetries; ii++ {
-		// Sleep will be VolInterval, 2*VolInterval, 3*VolInterval, ...
+		// Sleep will be VolInterval seconds
 		time.Sleep(time.Duration(VolInterval) * time.Second)
 
 		resp, err = svc.DescribeVolumes(&ec2.DescribeVolumesInput{
