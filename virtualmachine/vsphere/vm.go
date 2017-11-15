@@ -573,18 +573,16 @@ func (vm *VM) Provision() (err error) {
 	// Upload a template to all the datastores if `UseLocalTemplates` is set.
 	// Otherwise pick a random datastore out of the list that was passed in.
 	var datastores = vm.Datastores
-	if !vm.UseLocalTemplates {
-		n := util.Random(1, len(vm.Datastores))
-		datastores = []string{vm.Datastores[n-1]}
+	if !vm.UseLocalTemplates && len(vm.Datastores) != 0 {
+		datastores = []string{util.ChooseRandomString(vm.Datastores)}
 	}
 
+	var template string
+	template = vm.Template
 	usableDatastores := []string{}
 	for _, d := range datastores {
-		var template string
 		if vm.UseLocalTemplates {
 			template = createTemplateName(vm.Template, d)
-		} else {
-			template = vm.Template
 		}
 		// Does the VM template already exist?
 		e, err := Exists(vm, dcMo, template)
@@ -664,8 +662,7 @@ func (vm *VM) AddDisk() ([]string, error) {
 	}
 
 	// Gets a random datastore from the list of datastores to create disk
-	n := util.Random(1, len(vm.Datastores))
-	vm.datastore = vm.Datastores[n-1]
+	vm.datastore = util.ChooseRandomString(vm.Datastores)
 
 	// Reconfigures vm with the new Disk
 	diskList, err := reconfigureVM(vm, vmMo)
@@ -1581,8 +1578,7 @@ func CreateTemplate(vm *VM) error {
 		return fmt.Errorf("%s : Template already exists", vm.Template)
 	}
 	//selects a datstore at random and uploads the template
-	n := util.Random(1, len(vm.Datastores))
-	vm.datastore = vm.Datastores[n-1]
+	vm.datastore = util.ChooseRandomString(vm.Datastores)
 	err = uploadTemplate(vm, dcMo, vm.datastore)
 	return err
 }

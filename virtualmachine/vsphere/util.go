@@ -245,7 +245,9 @@ var findClusterComputeResource = func(vm *VM, dc *mo.Datacenter, name string) (*
 		return nil, err
 	}
 	cr := mo.ClusterComputeResource{}
-	err = vm.collector.RetrieveOne(vm.ctx, *mor, []string{"name", "host", "resourcePool", "datastore", "network"}, &cr)
+	err = vm.collector.RetrieveOne(vm.ctx, *mor, []string{"name",
+		"configuration", "host", "resourcePool", "datastore",
+		"network"}, &cr)
 	if err != nil {
 		return nil, err
 	}
@@ -419,7 +421,11 @@ func searchTree(vm *VM, mor types.ManagedObjectReference, name string) (*mo.Virt
 	case "VirtualMachine":
 		// Base recursive case, compare for value
 		vmMo := mo.VirtualMachine{}
-		err := vm.collector.RetrieveOne(vm.ctx, mor, []string{"name", "config", "guest.ipAddress", "guest.guestState", "guest.net", "runtime.question", "snapshot.currentSnapshot", "guest.toolsRunningStatus", "summary", "runtime"}, &vmMo)
+		err := vm.collector.RetrieveOne(vm.ctx, mor, []string{"name",
+			"config", "datastore", "guest.ipAddress",
+			"guest.guestState", "guest.net", "runtime.question",
+			"snapshot.currentSnapshot", "guest.toolsRunningStatus",
+			"summary", "runtime"}, &vmMo)
 		if err != nil {
 			return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
 		}
@@ -558,13 +564,19 @@ func removeExistingNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseV
 }
 
 var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []string) error {
-	n := util.Random(1, len(usableDatastores))
-	vm.datastore = usableDatastores[n-1]
-	dsMo, err := findDatastore(vm, dcMo, vm.datastore)
-	if err != nil {
-		return err
+	var (
+		err   error
+		dsMo  *mo.Datastore
+		dsMor types.ManagedObjectReference
+	)
+	vm.datastore = util.ChooseRandomString(usableDatastores)
+	if vm.datastore != "" {
+		dsMo, err = findDatastore(vm, dcMo, vm.datastore)
+		if err != nil {
+			return err
+		}
+		dsMor = dsMo.Reference()
 	}
-	dsMor := dsMo.Reference()
 	var template string
 	if vm.UseLocalTemplates {
 		template = createTemplateName(vm.Template, vm.datastore)
@@ -586,9 +598,18 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	// to delete all the network cards and create VirtualDevice specs.
 	// For now only configure the datastore and the host.
 	relocateSpec := types.VirtualMachineRelocateSpec{
-		Pool:      &l.ResourcePool,
-		Host:      &l.Host,
-		Datastore: &dsMor,
+		Pool: &l.ResourcePool,
+	}
+
+	isDrsEnabled, err := IsClusterDrsEnabled(vm)
+	if err != nil {
+		return err
+	}
+	if vm.Destination.HostSystem != "" || !isDrsEnabled {
+		relocateSpec.Host = &l.Host
+	}
+	if dsMo != nil {
+		relocateSpec.Datastore = &dsMor
 	}
 
 	deviceChangeSpec, err := reconfigureNetworks(vm, vmObj)
@@ -650,9 +671,13 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	if vm.UseLinkedClones {
 		relocateSpec = types.VirtualMachineRelocateSpec{
 			Pool:         &l.ResourcePool,
-			Host:         &l.Host,
-			Datastore:    &dsMor,
 			DiskMoveType: "createNewChildDiskBacking",
+		}
+		if vm.Destination.HostSystem != "" {
+			relocateSpec.Host = &l.Host
+		}
+		if dsMo != nil {
+			relocateSpec.Datastore = &dsMor
 		}
 		cisp = types.VirtualMachineCloneSpec{
 			Location: relocateSpec,
@@ -739,6 +764,26 @@ func CreateDisk(l object.VirtualDeviceList, c types.BaseVirtualController, ds ty
 	return device
 }
 
+var getDatastoreForVm = func(vm *VM, vmMo *mo.VirtualMachine) ([]string,
+	error) {
+	var (
+		dsMos      []mo.Datastore
+		datastores []string
+		err        error
+	)
+	dsMors := vmMo.Datastore
+	err = vm.collector.Retrieve(vm.ctx, dsMors, []string{"info"}, &dsMos)
+	if err != nil {
+		return nil, fmt.Errorf(
+			"Error retrieving datastores used by vm: %v", err)
+	}
+	for _, dsMo := range dsMos {
+		datastores = append(datastores,
+			dsMo.Info.GetDatastoreInfo().Name)
+	}
+	return datastores, nil
+}
+
 // reconfigureVM :reconfigureVM adds the disks to the vm and returns the vmdk
 // file names of the disks added
 // root disk datastore is used by default
@@ -758,6 +803,14 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
 		return nil, err
+	}
+
+	if vm.datastore == "" {
+		datastores, err := getDatastoreForVm(vm, vmMo)
+		if err != nil {
+			return nil, err
+		}
+		vm.datastore = util.ChooseRandomString(datastores)
 	}
 
 	for _, disk := range vm.Disks {
@@ -1107,8 +1160,8 @@ var getVMLocation = func(vm *VM, dcMo *mo.Datacenter) (l location, err error) {
 				err = fmt.Errorf("No suitable hosts found in the cluster")
 				return
 			}
-			n := util.Random(1, len(filteredHosts))
-			l.Host = filteredHosts[n-1]
+			n := util.Random(0, len(filteredHosts)-1)
+			l.Host = filteredHosts[n]
 		}
 		if crMo.ResourcePool == nil {
 			err = fmt.Errorf("No valid resource pool found on the host")
@@ -1289,6 +1342,9 @@ func validateHost(vm *VM, hsMor types.ManagedObjectReference) (bool, error) {
 		}
 	}
 
+	if vm.datastore == "" {
+		return nwValid, nil
+	}
 	for _, ds := range hsMo.Datastore {
 		dsMo := mo.Datastore{}
 		err := vm.collector.RetrieveOne(vm.ctx, ds, []string{"name"}, &dsMo)
@@ -1465,4 +1521,24 @@ func updateCustomSpec(vm *VM, tempMo *mo.VirtualMachine,
 	}
 
 	return customSpec
+}
+
+// IsClusterDrsEnabled: returns true if the cluster is drs enabled
+func IsClusterDrsEnabled(vm *VM) (bool, error) {
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return false, err
+	}
+	crMo, err := findClusterComputeResource(vm, dcMo,
+		vm.Destination.DestinationName)
+	if err != nil {
+		return false, err
+	}
+
+	drsEnabled := crMo.Configuration.DrsConfig.Enabled
+	if drsEnabled != nil {
+		return *drsEnabled, nil
+	}
+
+	return false, errors.New("error fetching cluster config details")
 }

@@ -59,3 +59,13 @@ func CombineErrors(delimiter string, errs ...error) error {
 
 	return fmt.Errorf(strings.Join(formatStrs, delimiter))
 }
+
+// ChooseRandomString: returns a random string from slice of string
+func ChooseRandomString(from []string) string {
+	lenFrom := len(from)
+	if lenFrom != 0 {
+		n := Random(0, lenFrom-1)
+		return from[n]
+	}
+	return ""
+}
