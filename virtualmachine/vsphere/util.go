@@ -18,6 +18,7 @@ import (
 	"reflect"
 	"regexp"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/vmware/govmomi"
@@ -59,6 +60,9 @@ func StringInSlice(str string, list []string) bool {
 	}
 	return false
 }
+
+// mutex for custom spec creation
+var checkCustomSpecMutex sync.Mutex
 
 // Exists checks if the VM already exists.
 var Exists = func(vm *VM, dc *mo.Datacenter, tName string) (bool, error) {
@@ -635,22 +639,13 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	}
 	config.DeviceChange = deviceChangeSpec
 
+	err = checkAndCreateCustomSpec(vm)
+	if err != nil {
+		return fmt.Errorf("Error creating custom spec: %v", err)
+	}
+
 	customizationSpecManager := object.NewCustomizationSpecManager(
 		vm.client.Client)
-	// check if customization specification exists
-	exists, err := customizationSpecManager.DoesCustomizationSpecExist(
-		vm.ctx, STATICIP_CUSTOM_SPEC_NAME)
-	if err != nil {
-		return err
-	}
-
-	if !exists {
-		err = createCustomSpecStaticIp(vm)
-		if err != nil {
-			return fmt.Errorf("Error creating custom spec: %v", err)
-		}
-	}
-
 	customSpecItem, err := customizationSpecManager.GetCustomizationSpec(
 		vm.ctx, STATICIP_CUSTOM_SPEC_NAME)
 	if err != nil {
@@ -1541,4 +1536,29 @@ func IsClusterDrsEnabled(vm *VM) (bool, error) {
 	}
 
 	return false, errors.New("error fetching cluster config details")
+}
+
+// checkAndCreateCustomSpec: checks if custom spec for static ip exists
+// creates if doesn't exist
+func checkAndCreateCustomSpec(vm *VM) error {
+	customizationSpecManager := object.NewCustomizationSpecManager(
+		vm.client.Client)
+
+	// Critical section - Only one thread should create custom spec
+	// if not present
+	checkCustomSpecMutex.Lock()
+	defer checkCustomSpecMutex.Unlock()
+	exists, err := customizationSpecManager.DoesCustomizationSpecExist(
+		vm.ctx, STATICIP_CUSTOM_SPEC_NAME)
+	if err != nil {
+		return err
+	}
+
+	if !exists {
+		err = createCustomSpecStaticIp(vm)
+		if err != nil {
+			return fmt.Errorf("Error creating custom spec: %v", err)
+		}
+	}
+	return nil
 }
