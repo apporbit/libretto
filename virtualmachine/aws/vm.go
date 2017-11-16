@@ -92,6 +92,10 @@ type VM struct {
 
 	SSHCreds            ssh.Credentials // required
 	DeleteKeysOnDestroy bool
+
+	// only relevant in GetSubnetList, GetSecurityGroupList & GetImageList
+	// filters result with given key-values
+	Filters map[string][]*string
 }
 
 // Region represents a AWS Region
@@ -554,16 +558,19 @@ func (vm *VM) GetVPCList() ([]VPC, error) {
 // most relevant filter(s) (map-keys): "vpc-id", "subnet-id", "availabilityZone"
 // See all available filters at below link
 // http://docs.aws.amazon.com/sdk-for-go/api/service/ec2/#DescribeSubnetsInput
-func (vm *VM) GetSubnetList(filter map[string][]*string) ([]Subnet, error) {
+func (vm *VM) GetSubnetList() ([]Subnet, error) {
 	svc, err := getService(vm.Region)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
 	}
 
-	filters := getFilters(filter)
+	filters := getFilters(vm.Filters)
 
-	input := &ec2.DescribeSubnetsInput{
-		Filters: filters}
+	input := &ec2.DescribeSubnetsInput{}
+	if filters != nil && len(filters) > 0 {
+		input.Filters = filters
+	}
+
 	subnetListOutput, err := svc.DescribeSubnets(input)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get Subnet list: %v", err)
@@ -594,16 +601,18 @@ func (vm *VM) GetSubnetList(filter map[string][]*string) ([]Subnet, error) {
 // most relevant filter(s) (map-keys): "vpc-id", "group-id"
 // See all available filters at below link
 // http://docs.aws.amazon.com/sdk-for-go/api/service/ec2/#DescribeSecurityGroupsInput
-func (vm *VM) GetSecurityGroupList(filter map[string][]*string) ([]SecurityGroup, error) {
+func (vm *VM) GetSecurityGroupList() ([]SecurityGroup, error) {
 	svc, err := getService(vm.Region)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
 	}
 
-	filters := getFilters(filter)
+	filters := getFilters(vm.Filters)
 
-	input := &ec2.DescribeSecurityGroupsInput{
-		Filters: filters}
+	input := &ec2.DescribeSecurityGroupsInput{}
+	if filters != nil && len(filters) > 0 {
+		input.Filters = filters
+	}
 
 	secGrpListOutput, err := svc.DescribeSecurityGroups(input)
 	if err != nil {
@@ -629,16 +638,18 @@ func (vm *VM) GetSecurityGroupList(filter map[string][]*string) ([]SecurityGroup
 
 // GetImageList: returns list of images available for given account
 // Includes public,owned private images & private images with explicit permission
-func (vm *VM) GetImageList(filter map[string][]*string) ([]Image, error) {
+func (vm *VM) GetImageList() ([]Image, error) {
 	svc, err := getService(vm.Region)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
 	}
 
-	filters := getFilters(filter)
+	filters := getFilters(vm.Filters)
 
-	input := &ec2.DescribeImagesInput{
-		Filters: filters}
+	input := &ec2.DescribeImagesInput{}
+	if filters != nil && len(filters) > 0 {
+		input.Filters = filters
+	}
 
 	imageListOutput, err := svc.DescribeImages(input)
 	if err != nil {
