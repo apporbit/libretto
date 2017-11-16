@@ -311,8 +311,8 @@ func GetInstanceStatus(svc *ec2.EC2, instID string) (*InstanceStatus, error) {
 	return status, nil
 }
 
-// GetFilters: converts filter map to array of pointers to ec2.Filter objects
-func GetFilters(filterMap map[string][]*string) []*ec2.Filter {
+// getFilters: converts filter map to array of pointers to ec2.Filter objects
+func getFilters(filterMap map[string][]*string) []*ec2.Filter {
 	filters := make([]*ec2.Filter, 0)
 	for key, values := range filterMap {
 		filters = append(filters, &ec2.Filter{
@@ -322,9 +322,9 @@ func GetFilters(filterMap map[string][]*string) []*ec2.Filter {
 	return filters
 }
 
-// ToEc2IpPermissions: converts array of IpPermission objects to
+// toEc2IpPermissions: converts array of IpPermission objects to
 // array of pointer to ec2.IpPermission
-func ToEc2IpPermissions(ipPermissions []IpPermission) []*ec2.IpPermission {
+func toEc2IpPermissions(ipPermissions []IpPermission) []*ec2.IpPermission {
 	ec2IpPermissions := make([]*ec2.IpPermission, 0)
 	for _, ipPermission := range ipPermissions {
 		ec2IpPermission := &ec2.IpPermission{
@@ -352,9 +352,9 @@ func ToEc2IpPermissions(ipPermissions []IpPermission) []*ec2.IpPermission {
 	return ec2IpPermissions
 }
 
-// ToVMAWSIpPermissions: converts array of ec2.IpPermission to
+// toVMAWSIpPermissions: converts array of ec2.IpPermission to
 // array of local IpPermission struct object
-func ToVMAWSIpPermissions(ec2IpPermissions []*ec2.IpPermission) []IpPermission {
+func toVMAWSIpPermissions(ec2IpPermissions []*ec2.IpPermission) []IpPermission {
 	ipPermissions := make([]IpPermission, 0)
 	for _, ipPermission := range ec2IpPermissions {
 		ipv4ranges := make([]string, 0)
@@ -375,8 +375,8 @@ func ToVMAWSIpPermissions(ec2IpPermissions []*ec2.IpPermission) []IpPermission {
 	return ipPermissions
 }
 
-// GetVolumeInput: returns input for create volume operation
-func GetVolumeInput(volume *EbsBlockVolume) *ec2.CreateVolumeInput {
+// getVolumeInput: returns input for create volume operation
+func getVolumeInput(volume *EbsBlockVolume) *ec2.CreateVolumeInput {
 	if volume.VolumeSize == nil {
 		defaultSize := int64(defaultVolumeSize)
 		volume.VolumeSize = &defaultSize
@@ -392,8 +392,8 @@ func GetVolumeInput(volume *EbsBlockVolume) *ec2.CreateVolumeInput {
 	return input
 }
 
-// GetVMAWSImage: returns local Image struct object for given ec2.Image
-func GetVMAWSImage(image *ec2.Image) Image {
+// getVMAWSImage: returns local Image struct object for given ec2.Image
+func getVMAWSImage(image *ec2.Image) Image {
 	ebsVolumes := make([]*EbsBlockVolume, 0)
 	for _, blockDeviceMapping := range image.BlockDeviceMappings {
 		ebsVolume := &EbsBlockVolume{

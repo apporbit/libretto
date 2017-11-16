@@ -560,7 +560,7 @@ func (vm *VM) GetSubnetList(filter map[string][]*string) ([]Subnet, error) {
 		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
 	}
 
-	filters := GetFilters(filter)
+	filters := getFilters(filter)
 
 	input := &ec2.DescribeSubnetsInput{
 		Filters: filters}
@@ -600,7 +600,7 @@ func (vm *VM) GetSecurityGroupList(filter map[string][]*string) ([]SecurityGroup
 		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
 	}
 
-	filters := GetFilters(filter)
+	filters := getFilters(filter)
 
 	input := &ec2.DescribeSecurityGroupsInput{
 		Filters: filters}
@@ -612,8 +612,8 @@ func (vm *VM) GetSecurityGroupList(filter map[string][]*string) ([]SecurityGroup
 
 	response := make([]SecurityGroup, 0)
 	for _, securityGroup := range secGrpListOutput.SecurityGroups {
-		ipPermissionsEgress := ToVMAWSIpPermissions(securityGroup.IpPermissionsEgress)
-		ipPermissions := ToVMAWSIpPermissions(securityGroup.IpPermissions)
+		ipPermissionsEgress := toVMAWSIpPermissions(securityGroup.IpPermissionsEgress)
+		ipPermissions := toVMAWSIpPermissions(securityGroup.IpPermissions)
 
 		response = append(response, SecurityGroup{
 			Id:                  *securityGroup.GroupId,
@@ -635,7 +635,7 @@ func (vm *VM) GetImageList(filter map[string][]*string) ([]Image, error) {
 		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
 	}
 
-	filters := GetFilters(filter)
+	filters := getFilters(filter)
 
 	input := &ec2.DescribeImagesInput{
 		Filters: filters}
@@ -647,7 +647,7 @@ func (vm *VM) GetImageList(filter map[string][]*string) ([]Image, error) {
 
 	response := make([]Image, 0)
 	for _, image := range imageListOutput.Images {
-		img := GetVMAWSImage(image)
+		img := getVMAWSImage(image)
 		response = append(response, img)
 	}
 	return response, nil
@@ -662,7 +662,7 @@ func (vm *VM) AuthorizeSecurityGroup() error {
 
 	secGrp := vm.SecurityGroups[0]
 
-	ec2IpPermissions := ToEc2IpPermissions(secGrp.IpPermissions)
+	ec2IpPermissions := toEc2IpPermissions(secGrp.IpPermissions)
 	input := &ec2.AuthorizeSecurityGroupIngressInput{
 		GroupId:       &secGrp.Id,
 		IpPermissions: ec2IpPermissions}
@@ -672,7 +672,7 @@ func (vm *VM) AuthorizeSecurityGroup() error {
 		return fmt.Errorf("Failed to authorize security group ingress rules: %v", err)
 	}
 
-	ec2IpPermissionsEgress := ToEc2IpPermissions(
+	ec2IpPermissionsEgress := toEc2IpPermissions(
 		secGrp.IpPermissionsEgress)
 	egressInput := &ec2.AuthorizeSecurityGroupEgressInput{
 		GroupId:       &secGrp.Id,
@@ -694,7 +694,7 @@ func (vm *VM) RevokeSecurityGroup() error {
 
 	secGrp := vm.SecurityGroups[0]
 
-	ec2IpPermissions := ToEc2IpPermissions(secGrp.IpPermissions)
+	ec2IpPermissions := toEc2IpPermissions(secGrp.IpPermissions)
 	input := &ec2.RevokeSecurityGroupIngressInput{
 		GroupId:       &secGrp.Id,
 		IpPermissions: ec2IpPermissions}
@@ -703,7 +703,7 @@ func (vm *VM) RevokeSecurityGroup() error {
 		return fmt.Errorf("Failed to revoke security group ingress rules: %v", err)
 	}
 
-	ec2IpPermissionsEgress := ToEc2IpPermissions(
+	ec2IpPermissionsEgress := toEc2IpPermissions(
 		secGrp.IpPermissionsEgress)
 	egressInput := &ec2.RevokeSecurityGroupEgressInput{
 		GroupId:       &secGrp.Id,
@@ -730,7 +730,7 @@ func (vm *VM) CreateVolume() error {
 	}
 	volume.AvailabilityZone = instanceStatus.AvailabilityZone
 
-	input := GetVolumeInput(&volume)
+	input := getVolumeInput(&volume)
 	response, err := svc.CreateVolume(input)
 	if err != nil {
 		return fmt.Errorf("Failed to create volume: %v", err)

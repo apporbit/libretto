@@ -198,6 +198,7 @@ func waitUntilState(svc *ec2.EC2, instanceID string,
 	for state, val := range matchBreakState {
 		if val {
 			matchState = state
+			break
 		}
 	}
 
