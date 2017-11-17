@@ -73,28 +73,129 @@ type VM struct {
 	Region                 string // required
 	AMI                    string
 	InstanceType           string
-	InstanceID             string
+	InstanceID             string // required when adding volume
 	KeyPair                string // required
 	IamInstanceProfileName string
 	PrivateIPAddress       string
 
-	Volumes                      []EBSVolume
+	// required when addding or deleting volume
+	Volumes                      []EbsBlockVolume
 	KeepRootVolumeOnDestroy      bool
 	DeleteNonRootVolumeOnDestroy bool
 
-	VPC            string
-	Subnet         string
-	SecurityGroups []string
+	VPC    string
+	Subnet string
+	// required when modifying security group rules
+	// all other parameters except this one and Region
+	// is ingnored while security group modification
+	SecurityGroups []SecurityGroup
 
 	SSHCreds            ssh.Credentials // required
 	DeleteKeysOnDestroy bool
+
+	// only relevant in GetSubnetList, GetSecurityGroupList & GetImageList
+	// filters result with given key-values
+	Filters map[string][]*string
 }
 
-// EBSVolume represents an EBS Volume
-type EBSVolume struct {
-	DeviceName string
-	VolumeSize int
-	VolumeType string
+// Region represents a AWS Region
+type Region struct {
+	Name           string `json:"name,omitempty"`
+	RegionEndpoint string `json:"region_endpoint,omitempty"`
+}
+
+// Zone represents a AWS availability zone
+type Zone struct {
+	Name   string `json:"name,omitempty"`
+	State  string `json:"state,omitempty"`
+	Region string `json:"region,omitempty"`
+}
+
+// VPC represents a AWS VPC
+type VPC struct {
+	Id         string   `json:"id,omitempty"`
+	State      string   `json:"state,omitempty"`
+	IsDefault  *bool    `json:"is_default,omitempty"`
+	IPv4Blocks []string `json:"ipv4_blocks,omitempty"`
+	IPv6Blocks []string `json:"ipv6_blocks,omitempty"`
+	// ID of DHCP options associated with VPC
+	DhcpOptionsId string `json:"dhcp_options_id,omitempty"`
+	// Allowed tenancy of instances launched into the VPC
+	InstanceTenancy string `json:"instance_tenancy,omitempty"`
+}
+
+// Subnet represents a AWS Subnet
+type Subnet struct {
+	Id                    string   `json:"id,omitempty"`
+	State                 string   `json:"state,omitempty"`
+	VpcId                 string   `json:"vpc_id,omitempty"`
+	IPv4Block             string   `json:"ipv4block,omitempty"`
+	IPv6Blocks            []string `json:"ipv6blocks,omitempty"`
+	AvailableAddressCount *int64   `json:"available_address_count,omitempty"`
+	// Availability Zone of the subnet
+	AvailabilityZone string `json:"availability_zone,omitempty"`
+	// Indicates if this is default for Availability Zone
+	DefaultForAz        bool `json:"default_for_az,omitempty"`
+	MapPublicIpOnLaunch bool `json:"map_public_ip_on_launch,omitempty"`
+}
+
+// IpPermission in AWS is used to represent inbound or outbound rules
+// associated with SecurityGroup
+type IpPermission struct {
+	FromPort   *int64   `json:"from_port,omitempty"`
+	ToPort     *int64   `json:"to_port,omitempty"`
+	IpProtocol string   `json:"ip_protocol,omitempty"`
+	Ipv4Ranges []string `json:"ipv4_ranges,omitempty"`
+	Ipv6Ranges []string `json:"ipv6_ranges,omitempty"`
+}
+
+// SecurityGroup represents a AWS SecurityGroup
+type SecurityGroup struct {
+	Id                  string         `json:"id,omitempty"`
+	Name                string         `json:"name,omitempty"`
+	Description         string         `json:"description,omitempty"`
+	OwnerId             string         `json:"owner_id,omitempty"`
+	VpcId               string         `json:"vpc_id,omitempty"`
+	IpPermissionsEgress []IpPermission `json:"ip_permissions_egress,omitempty"`
+	IpPermissions       []IpPermission `json:"ip_permissions,omitempty"`
+}
+
+// InstanceStatus represents AWS InstanceStatus
+type InstanceStatus struct {
+	AvailabilityZone string `json:"availability_zone,omitempty"`
+	InstanceId       string `json:"instance_id,omitempty"`
+	State            string `json:"state,omitempty"`
+}
+
+// EbsBlockVolume represents a AWS EbsBlockDevice
+type EbsBlockVolume struct {
+	DeviceName       string `json:"device_name,omitempty"`
+	VolumeSize       *int64 `json:"volume_size,omitempty"`
+	VolumeType       string `json:"volume_type,omitempty"`
+	AvailabilityZone string `json:"availability_zone,omitempty"`
+	VolumeId         string `json:"volume_id,omitempty"`
+	SnapshotId       string `json:"snapshot_id,omitempty"`
+}
+
+// Image represents a AWS Image
+type Image struct {
+	Id                 *string           `json:"id,omitempty"`
+	Name               *string           `json:"name,omitempty"`
+	Description        *string           `json:"description,omitempty"`
+	State              *string           `json:"state,omitempty"`
+	OwnerId            *string           `json:"owner_id,omitempty"`
+	OwnerAlias         *string           `json:"owner_alias,omitempty"`
+	CreationDate       *string           `json:"creation_date,omitempty"`
+	Architecture       *string           `json:"architecture,omitempty"`
+	Platform           *string           `json:"platform,omitempty"`
+	Hypervisor         *string           `json:"hypervisor,omitempty"`
+	VirtualizationType *string           `json:"virtualization_type,omitempty"`
+	ImageType          *string           `json:"image_type,omitempty"`
+	KernelId           *string           `json:"kernel_id,omitemtpy"`
+	RootDeviceName     *string           `json:"root_device_name,omitempty"`
+	RootDeviceType     *string           `json:"root_device_type,omitempty"`
+	Public             *bool             `json:"public,omitempty"`
+	EbsVolumes         []*EbsBlockVolume `json:"ebs_volumes,omitempty"`
 }
 
 // GetName returns the name of the virtual machine
@@ -249,6 +350,10 @@ func (vm *VM) Destroy() error {
 		return err
 	}
 
+	if err := waitUntilTerminated(svc, vm.InstanceID); err != nil {
+		return err
+	}
+
 	if !vm.DeleteKeysOnDestroy {
 		return nil
 	}
@@ -333,6 +438,10 @@ func (vm *VM) Halt() error {
 		return fmt.Errorf("Failed to stop instance: %v", err)
 	}
 
+	if err := waitUntilStopped(svc, vm.InstanceID); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -356,6 +465,361 @@ func (vm *VM) Start() error {
 	})
 	if err != nil {
 		return fmt.Errorf("Failed to start instance: %v", err)
+	}
+
+	if err := waitUntilRunning(svc, vm.InstanceID); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// GetRegionList: returns list of regions
+func (vm *VM) GetRegionList() ([]Region, error) {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	regionListOutput, err := svc.DescribeRegions(&ec2.DescribeRegionsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get region list: %v", err)
+	}
+	response := make([]Region, 0)
+	for _, region := range regionListOutput.Regions {
+		response = append(response, Region{
+			Name:           *region.RegionName,
+			RegionEndpoint: *region.Endpoint})
+	}
+
+	return response, nil
+}
+
+// GetAvailabilityZoneList: returns list of availability zones for a region
+func (vm *VM) GetAvailabilityZoneList() ([]Zone, error) {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	zoneListOutput, err := svc.DescribeAvailabilityZones(
+		&ec2.DescribeAvailabilityZonesInput{})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get availabilityZone list: %v", err)
+	}
+	response := make([]Zone, 0)
+	for _, zone := range zoneListOutput.AvailabilityZones {
+		response = append(response, Zone{
+			Name:   *zone.ZoneName,
+			State:  *zone.State,
+			Region: *zone.RegionName})
+	}
+	return response, nil
+}
+
+// GetVPCList: returns list of VPCs for given region
+func (vm *VM) GetVPCList() ([]VPC, error) {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	vpcListOutput, err := svc.DescribeVpcs(&ec2.DescribeVpcsInput{})
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get VPC list: %v", err)
+	}
+	response := make([]VPC, 0)
+	for _, vpc := range vpcListOutput.Vpcs {
+		ipv4Blocks := make([]string, 0)
+		for _, ipv4Block := range vpc.CidrBlockAssociationSet {
+			ipv4Blocks = append(ipv4Blocks,
+				*ipv4Block.CidrBlock)
+		}
+
+		ipv6Blocks := make([]string, 0)
+		for _, ipv6Block := range vpc.Ipv6CidrBlockAssociationSet {
+			ipv6Blocks = append(ipv6Blocks,
+				*ipv6Block.Ipv6CidrBlock)
+		}
+
+		response = append(response, VPC{
+			Id:              *vpc.VpcId,
+			State:           *vpc.State,
+			IsDefault:       vpc.IsDefault,
+			DhcpOptionsId:   *vpc.DhcpOptionsId,
+			InstanceTenancy: *vpc.InstanceTenancy,
+			IPv4Blocks:      ipv4Blocks,
+			IPv6Blocks:      ipv6Blocks})
+	}
+	return response, nil
+}
+
+// GetSubnetList: returns list of all subnet for given region
+// most relevant filter(s) (map-keys): "vpc-id", "subnet-id", "availabilityZone"
+// See all available filters at below link
+// http://docs.aws.amazon.com/sdk-for-go/api/service/ec2/#DescribeSubnetsInput
+func (vm *VM) GetSubnetList() ([]Subnet, error) {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	filters := getFilters(vm.Filters)
+
+	input := &ec2.DescribeSubnetsInput{}
+	if filters != nil && len(filters) > 0 {
+		input.Filters = filters
+	}
+
+	subnetListOutput, err := svc.DescribeSubnets(input)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get Subnet list: %v", err)
+	}
+	response := make([]Subnet, 0)
+	for _, subnet := range subnetListOutput.Subnets {
+		ipv6Blocks := make([]string, 0)
+		for _, ipv6Block := range subnet.Ipv6CidrBlockAssociationSet {
+			ipv6Blocks = append(ipv6Blocks,
+				*ipv6Block.Ipv6CidrBlock)
+		}
+
+		response = append(response, Subnet{
+			Id:                    *subnet.SubnetId,
+			State:                 *subnet.State,
+			VpcId:                 *subnet.VpcId,
+			IPv4Block:             *subnet.CidrBlock,
+			AvailableAddressCount: subnet.AvailableIpAddressCount,
+			AvailabilityZone:      *subnet.AvailabilityZone,
+			DefaultForAz:          *subnet.DefaultForAz,
+			MapPublicIpOnLaunch:   *subnet.MapPublicIpOnLaunch,
+			IPv6Blocks:            ipv6Blocks})
+	}
+	return response, nil
+}
+
+// GetSecurityGroupList : returns list of all securityGroup for given region
+// most relevant filter(s) (map-keys): "vpc-id", "group-id"
+// See all available filters at below link
+// http://docs.aws.amazon.com/sdk-for-go/api/service/ec2/#DescribeSecurityGroupsInput
+func (vm *VM) GetSecurityGroupList() ([]SecurityGroup, error) {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	filters := getFilters(vm.Filters)
+
+	input := &ec2.DescribeSecurityGroupsInput{}
+	if filters != nil && len(filters) > 0 {
+		input.Filters = filters
+	}
+
+	secGrpListOutput, err := svc.DescribeSecurityGroups(input)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get SecurityGroup list: %v", err)
+	}
+
+	response := make([]SecurityGroup, 0)
+	for _, securityGroup := range secGrpListOutput.SecurityGroups {
+		ipPermissionsEgress := toVMAWSIpPermissions(securityGroup.IpPermissionsEgress)
+		ipPermissions := toVMAWSIpPermissions(securityGroup.IpPermissions)
+
+		response = append(response, SecurityGroup{
+			Id:                  *securityGroup.GroupId,
+			Name:                *securityGroup.GroupName,
+			Description:         *securityGroup.Description,
+			OwnerId:             *securityGroup.OwnerId,
+			VpcId:               *securityGroup.VpcId,
+			IpPermissionsEgress: ipPermissionsEgress,
+			IpPermissions:       ipPermissions})
+	}
+	return response, nil
+}
+
+// GetImageList: returns list of images available for given account
+// Includes public,owned private images & private images with explicit permission
+func (vm *VM) GetImageList() ([]Image, error) {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	filters := getFilters(vm.Filters)
+
+	input := &ec2.DescribeImagesInput{}
+	if filters != nil && len(filters) > 0 {
+		input.Filters = filters
+	}
+
+	imageListOutput, err := svc.DescribeImages(input)
+	if err != nil {
+		return nil, fmt.Errorf("Failed to get Image list: %v", err)
+	}
+
+	response := make([]Image, 0)
+	for _, image := range imageListOutput.Images {
+		img := getVMAWSImage(image)
+		response = append(response, img)
+	}
+	return response, nil
+}
+
+// AuthorizeSecurityGroup: Adds one or more rules to a security group
+func (vm *VM) AuthorizeSecurityGroup() error {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	secGrp := vm.SecurityGroups[0]
+
+	ec2IpPermissions := toEc2IpPermissions(secGrp.IpPermissions)
+	input := &ec2.AuthorizeSecurityGroupIngressInput{
+		GroupId:       &secGrp.Id,
+		IpPermissions: ec2IpPermissions}
+
+	_, err = svc.AuthorizeSecurityGroupIngress(input)
+	if err != nil {
+		return fmt.Errorf("Failed to authorize security group ingress rules: %v", err)
+	}
+
+	ec2IpPermissionsEgress := toEc2IpPermissions(
+		secGrp.IpPermissionsEgress)
+	egressInput := &ec2.AuthorizeSecurityGroupEgressInput{
+		GroupId:       &secGrp.Id,
+		IpPermissions: ec2IpPermissionsEgress}
+	_, err = svc.AuthorizeSecurityGroupEgress(egressInput)
+	if err != nil {
+		return fmt.Errorf("Failed to authorize security group egress rules: %v", err)
+	}
+
+	return nil
+}
+
+// RevokeSecurityGroup: Removes one or more rules from a security group
+func (vm *VM) RevokeSecurityGroup() error {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	secGrp := vm.SecurityGroups[0]
+
+	ec2IpPermissions := toEc2IpPermissions(secGrp.IpPermissions)
+	input := &ec2.RevokeSecurityGroupIngressInput{
+		GroupId:       &secGrp.Id,
+		IpPermissions: ec2IpPermissions}
+	_, err = svc.RevokeSecurityGroupIngress(input)
+	if err != nil {
+		return fmt.Errorf("Failed to revoke security group ingress rules: %v", err)
+	}
+
+	ec2IpPermissionsEgress := toEc2IpPermissions(
+		secGrp.IpPermissionsEgress)
+	egressInput := &ec2.RevokeSecurityGroupEgressInput{
+		GroupId:       &secGrp.Id,
+		IpPermissions: ec2IpPermissionsEgress}
+	_, err = svc.RevokeSecurityGroupEgress(egressInput)
+	if err != nil {
+		return fmt.Errorf("Failed to revoke security group egress rules: %v", err)
+	}
+
+	return nil
+}
+
+// CreateVolume: Creates a volume with given parameter
+func (vm *VM) CreateVolume() error {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	volume := vm.Volumes[0]
+	instanceStatus, err := GetInstanceStatus(svc, vm.InstanceID)
+	if err != nil {
+		return fmt.Errorf("Failed to get availability zone of instance: %v", err)
+	}
+	volume.AvailabilityZone = instanceStatus.AvailabilityZone
+
+	input := getVolumeInput(&volume)
+	response, err := svc.CreateVolume(input)
+	if err != nil {
+		return fmt.Errorf("Failed to create volume: %v", err)
+	}
+
+	if err := waitForCreate(svc, *response.VolumeId); err != nil {
+		return err
+	}
+
+	volume.VolumeId = *response.VolumeId
+	vm.Volumes[0] = volume
+
+	return nil
+}
+
+// AttachVolume: Attaches given volume to given instance
+func (vm *VM) AttachVolume() error {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	volume := vm.Volumes[0]
+	input := &ec2.AttachVolumeInput{
+		Device:     &volume.DeviceName,
+		InstanceId: &vm.InstanceID,
+		VolumeId:   &volume.VolumeId}
+	_, err = svc.AttachVolume(input)
+	if err != nil {
+		return fmt.Errorf("Failed to attach volume (volumeId %s) to "+
+			"instance (instanceId %s): %v", volume.VolumeId, err)
+	}
+
+	if err := waitForAttach(svc, volume.VolumeId); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// DetachVolume: Detaches volume with given Id from instance
+func (vm *VM) DetachVolume() error {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	volume := vm.Volumes[0]
+	input := &ec2.DetachVolumeInput{
+		VolumeId: &volume.VolumeId}
+	_, err = svc.DetachVolume(input)
+	if err != nil {
+		return fmt.Errorf("Failed to detach volume (volumeId %s) from "+
+			"instance (instanceId %s): %v", volume.VolumeId, err)
+	}
+
+	if err := waitForDetach(svc, volume.VolumeId); err != nil {
+		return err
+	}
+
+	return nil
+}
+
+// DeleteVolume: Deletes volume with given Id
+// Disk must not be in-use by any instance
+func (vm *VM) DeleteVolume() error {
+	svc, err := getService(vm.Region)
+	if err != nil {
+		return fmt.Errorf("Failed to get AWS service: %v", err)
+	}
+
+	volume := vm.Volumes[0]
+	input := &ec2.DeleteVolumeInput{
+		VolumeId: &volume.VolumeId}
+	_, err = svc.DeleteVolume(input)
+	if err != nil {
+		return fmt.Errorf("Failed to delete volume (volumeId %s): %v",
+			volume.VolumeId, err)
 	}
 
 	return nil
