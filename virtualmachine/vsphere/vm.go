@@ -735,7 +735,12 @@ func getNicInfo(vmMo mo.VirtualMachine) []VirtualEthernetCard {
 			nwcard := c.GetVirtualEthernetCard()
 			nic.MacAddress = nwcard.MacAddress
 			nic.NicName = nwcard.DeviceInfo.GetDescription().Label
-			nic.NetworkName = nwcard.Backing.(*types.VirtualEthernetCardNetworkBackingInfo).DeviceName
+			switch b := nwcard.Backing.(type) {
+			case *types.VirtualEthernetCardNetworkBackingInfo:
+				nic.NetworkName = b.DeviceName
+			default:
+				continue
+			}
 			nicInfo = append(nicInfo, nic)
 		}
 	}
