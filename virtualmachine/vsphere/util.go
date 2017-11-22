@@ -512,20 +512,37 @@ func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirt
 			// Edit device
 			nw = vm.Networks[idx]
 			for _, nwMappingObj := range networkMapping {
-				if nwMappingObj.Name == nw["name"] {
-					device.GetVirtualDevice().Backing = &types.VirtualEthernetCardNetworkBackingInfo{
+				if nwMappingObj.Name != nw["name"] {
+					continue
+				}
+				var backing types.BaseVirtualDeviceBackingInfo
+				switch nwMappingObj.Network.Type {
+				case "Network":
+					backing = &types.VirtualEthernetCardNetworkBackingInfo{
 						VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo{
 							DeviceName: nwMappingObj.Name,
 						},
 						Network: &nwMappingObj.Network,
 					}
-					spec := &types.VirtualDeviceConfigSpec{
-						Operation: types.VirtualDeviceConfigSpecOperationEdit,
-						Device:    device,
+				case "DistributedVirtualPortgroup":
+					dvsObj := object.NewDistributedVirtualPortgroup(
+						vm.client.Client,
+						nwMappingObj.Network)
+					backing, err =
+						dvsObj.EthernetCardBackingInfo(
+							vm.ctx)
+					if err != nil {
+						return nil, fmt.Errorf("error fetching ethernet card "+
+							"backing info: %v", err)
 					}
-					deviceSpecs = append(deviceSpecs, spec)
-					break
 				}
+				device.GetVirtualDevice().Backing = backing
+				spec := &types.VirtualDeviceConfigSpec{
+					Operation: types.VirtualDeviceConfigSpecOperationEdit,
+					Device:    device,
+				}
+				deviceSpecs = append(deviceSpecs, spec)
+				break
 			}
 			idx++
 		}
