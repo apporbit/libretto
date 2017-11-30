@@ -846,3 +846,8 @@ func (vm *VM) ResetKeyPair() {
 	vm.SSHCreds.SSHPrivateKey = ""
 	vm.KeyPair = ""
 }
+
+// ValidateAuth: returns error if credentials are incorrect
+func (vm *VM) ValidateAuth() error {
+	return errors.New("Action : validate auth not supported")
+}

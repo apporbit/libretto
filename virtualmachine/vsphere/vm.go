@@ -1711,3 +1711,12 @@ func ConvertToTemplate(vm *VM) error {
 	}
 	return nil
 }
+
+// ValidateAuth: returns error if vcenter credentials are incorrect
+func (vm *VM) ValidateAuth() error {
+	if err := SetupSession(vm); err != nil {
+		return err
+	}
+	defer vm.cancel()
+	return nil
+}

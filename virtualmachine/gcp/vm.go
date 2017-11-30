@@ -403,9 +403,9 @@ func (vm *VM) GetNetworkList() ([]Network, error) {
 				convResURLToName(subnetworkURL))
 		}
 		response = append(response, Network{
-			Name:                  network.Name,
-			Description:           network.Description,
-			Id:                    network.Id,
+			Name:        network.Name,
+			Description: network.Description,
+			Id:          network.Id,
 			AutoCreateSubnetworks: &network.AutoCreateSubnetworks,
 			CreationTimestamp:     network.CreationTimestamp,
 			IPv4Range:             network.IPv4Range,
@@ -760,4 +760,9 @@ func (vm *VM) DeleteImage() error {
 	}
 
 	return s.deleteImage()
+}
+
+// ValidateAuth: returns error if credentials are incorrect
+func (vm *VM) ValidateAuth() error {
+	return errors.New("Action : validate auth not supported")
 }
