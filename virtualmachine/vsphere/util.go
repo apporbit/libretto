@@ -441,14 +441,40 @@ func searchTree(vm *VM, mor types.ManagedObjectReference, name string) (*mo.Virt
 	return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
 }
 
+func getEthernetBacking(vm *VM, nwMor types.ManagedObjectReference,
+	name string) (types.BaseVirtualDeviceBackingInfo, error) {
+	var (
+		backing types.BaseVirtualDeviceBackingInfo
+		err     error
+	)
+	switch nwMor.Type {
+	case "Network":
+		backing = &types.VirtualEthernetCardNetworkBackingInfo{
+			VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo{
+				DeviceName: name,
+			},
+			Network: &nwMor,
+		}
+	case "DistributedVirtualPortgroup":
+		dvsObj := object.NewDistributedVirtualPortgroup(
+			vm.client.Client, nwMor)
+		backing, err =
+			dvsObj.EthernetCardBackingInfo(
+				vm.ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error fetching ethernet card "+
+				"backing info: %v", err)
+		}
+	}
+	return backing, nil
+}
+
 // createNetworkDeviceSpec : createNetworkDeviceSpec creates the device spec for the network nwMor
-func addNetworkDeviceSpec(nwMor types.ManagedObjectReference, name string) (*types.VirtualDeviceConfigSpec, error) {
+func addNetworkDeviceSpec(vm *VM, nwMor types.ManagedObjectReference, name string) (*types.VirtualDeviceConfigSpec, error) {
 	// create backing object
-	backing := &types.VirtualEthernetCardNetworkBackingInfo{
-		VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo{
-			DeviceName: name,
-		},
-		Network: &nwMor,
+	backing, err := getEthernetBacking(vm, nwMor, name)
+	if err != nil {
+		return nil, err
 	}
 	// create ethernet card with the backing info
 	device, err := object.EthernetCardTypes().CreateEthernetCard("vmxnet3", backing)
@@ -515,26 +541,10 @@ func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirt
 				if nwMappingObj.Name != nw["name"] {
 					continue
 				}
-				var backing types.BaseVirtualDeviceBackingInfo
-				switch nwMappingObj.Network.Type {
-				case "Network":
-					backing = &types.VirtualEthernetCardNetworkBackingInfo{
-						VirtualDeviceDeviceBackingInfo: types.VirtualDeviceDeviceBackingInfo{
-							DeviceName: nwMappingObj.Name,
-						},
-						Network: &nwMappingObj.Network,
-					}
-				case "DistributedVirtualPortgroup":
-					dvsObj := object.NewDistributedVirtualPortgroup(
-						vm.client.Client,
-						nwMappingObj.Network)
-					backing, err =
-						dvsObj.EthernetCardBackingInfo(
-							vm.ctx)
-					if err != nil {
-						return nil, fmt.Errorf("error fetching ethernet card "+
-							"backing info: %v", err)
-					}
+				backing, err := getEthernetBacking(vm,
+					nwMappingObj.Network, nwMappingObj.Name)
+				if err != nil {
+					return nil, err
 				}
 				device.GetVirtualDevice().Backing = backing
 				spec := &types.VirtualDeviceConfigSpec{
@@ -552,7 +562,7 @@ func reconfigureNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseVirt
 	for _, nw = range vm.Networks[idx:] {
 		for _, mapping := range networkMapping {
 			if mapping.Name == nw["name"] {
-				spec, err := addNetworkDeviceSpec(mapping.Network, mapping.Name)
+				spec, err := addNetworkDeviceSpec(vm, mapping.Network, mapping.Name)
 				if err != nil {
 					return nil, err
 				}
