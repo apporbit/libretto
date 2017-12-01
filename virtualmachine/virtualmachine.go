@@ -24,7 +24,7 @@ type VirtualMachine interface {
 	GetSSH(ssh.Options) (ssh.Client, error)
 }
 
-type NetworkSettings struct {
+type NetworkSetting struct {
 	Ip         string `json:"ip_address"`
 	Gateway    string `json:"default_gateway"`
 	SubnetMask string `json:"subnet_mask"`

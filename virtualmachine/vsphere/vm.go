@@ -37,6 +37,16 @@ const (
 	SKIPTEMPLATE_ERROR = iota
 	SKIPTEMPLATE_OVERWRITE
 	SKIPTEMPLATE_USE
+
+	// Constants for supproted values for Flavor:Name
+	FlavorSmall   = "small"
+	FlavorMedium  = "medium"
+	FlavorLarge   = "large"
+	FlavorXLarge  = "xlarge"
+	Flavor2XLarge = "2xlarge"
+	Flavor4XLarge = "4xlarge"
+	Flavor8XLarge = "8xlarge"
+	FlavorCustom  = "custom"
 )
 
 type vmwareFinder struct {
@@ -501,6 +511,9 @@ type VMInfo struct {
 }
 
 type Flavor struct {
+	// Flavor name. Supported values are defined as
+	// constants [FlavorLarge, FlavorSmall, FlavorMedium, FlavorCustom]
+	Name string
 	// Represents the number of CPUs
 	NumCPUs int32
 	// Represents the size of main memory in MB
@@ -546,7 +559,7 @@ type VM struct {
 	// the datastores that were passed in.
 	UseLocalTemplates bool
 	// SkipExisting when set to '2' lets Provision succeed even if the VM already exists.
-	SkipExisting int
+	SkipExisting *int
 	// Credentials are the credentials to use when connecting to the VM over SSH
 	Credentials ssh.Credentials
 	// FixedDisks is a slice of existing disks which user wants to either expand/delete from VM
@@ -562,15 +575,15 @@ type VM struct {
 	// linked clones.
 	UseLinkedClones bool
 	// Skip waiting for IP to be assigned to VM in create/start actions
-	SkipIPWait      bool
-	uri             *url.URL
-	ctx             context.Context
-	cancel          context.CancelFunc
-	client          *govmomi.Client
-	finder          finder
-	collector       collector
-	datastore       string
-	NetworkSettings lvm.NetworkSettings
+	SkipIPWait     bool
+	uri            *url.URL
+	ctx            context.Context
+	cancel         context.CancelFunc
+	client         *govmomi.Client
+	finder         finder
+	collector      collector
+	datastore      string
+	NetworkSetting lvm.NetworkSetting
 }
 
 // Provision provisions this VM.
@@ -610,7 +623,7 @@ func (vm *VM) Provision() (err error) {
 
 		// If it does exist, return an error if the skip existing is set to 0/SKIPTEMPLATE_ERROR
 		if e {
-			switch vm.SkipExisting {
+			switch *vm.SkipExisting {
 			case SKIPTEMPLATE_USE: //PASS
 			case SKIPTEMPLATE_ERROR:
 				return fmt.Errorf("Template already exists: %s", vm.Template)
