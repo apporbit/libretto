@@ -594,6 +594,51 @@ func removeExistingNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseV
 	return removeSpecs, nil
 }
 
+func FindByVirtualDeviceFileName(disks []Disk, name string) *Disk {
+	for _, disk := range disks {
+		if disk.DiskName == name {
+			return &disk
+		}
+	}
+	return nil
+}
+
+func resizeAndDeleteVols(vmMo mo.VirtualMachine, disks []Disk) ([]types.BaseVirtualDeviceConfigSpec, error) {
+	var deviceSpecs []types.BaseVirtualDeviceConfigSpec
+	devices := object.VirtualDeviceList(vmMo.Config.Hardware.Device)
+	for _, device := range devices {
+		if editdisk, ok := device.(*types.VirtualDisk); ok {
+			backing := editdisk.Backing
+			fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
+			disk := FindByVirtualDeviceFileName(disks, fileBackingInfo.FileName)
+			var dvconfig types.BaseVirtualDeviceConfigSpec
+			if disk == nil {
+				// if user wants to delete the disk
+				dvconfig = &types.VirtualDeviceConfigSpec{
+					Operation: types.VirtualDeviceConfigSpecOperationRemove,
+					Device:    editdisk,
+				}
+
+			} else {
+				capacityInKB := int64(disk.Size * 1024 * 1024)
+				if editdisk.CapacityInKB > capacityInKB {
+					//If user wants to shrink the disk capacity
+					return nil, fmt.Errorf("error : Shrinking Virtual Disks is not supported")
+				} else if editdisk.CapacityInKB < capacityInKB {
+					editdisk.CapacityInKB = capacityInKB
+					dvconfig = &types.VirtualDeviceConfigSpec{
+						Device:    editdisk,
+						Operation: types.VirtualDeviceConfigSpecOperationEdit,
+					}
+				}
+			}
+			deviceSpecs = append(deviceSpecs, dvconfig)
+		}
+
+	}
+	return deviceSpecs, nil
+}
+
 var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []string) error {
 	var (
 		err   error
@@ -665,6 +710,13 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		CpuHotAddEnabled:    &hotAddCpu,
 	}
 	config.DeviceChange = deviceChangeSpec
+
+	//Resize (increase)/delete existing volumes in VM template
+	conf, err := resizeAndDeleteVols(*vmMo, vm.FixedDisks)
+	config.DeviceChange = append(config.DeviceChange, conf...)
+	if err != nil {
+		return err
+	}
 
 	err = checkAndCreateCustomSpec(vm)
 	if err != nil {
