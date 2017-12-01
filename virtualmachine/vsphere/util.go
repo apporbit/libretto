@@ -1693,7 +1693,7 @@ func createCustomSpecStaticIp(vm *VM) error {
 func updateCustomSpec(vm *VM, tempMo *mo.VirtualMachine,
 	customSpec *types.CustomizationSpec) *types.CustomizationSpec {
 	// if ip or subnet is not passed return nil
-	if vm.NetworkSettings.Ip == "" || vm.NetworkSettings.SubnetMask == "" {
+	if vm.NetworkSetting.Ip == "" || vm.NetworkSetting.SubnetMask == "" {
 		return nil
 	}
 	// set ip address, subnet mask, default gateway
@@ -1702,15 +1702,15 @@ func updateCustomSpec(vm *VM, tempMo *mo.VirtualMachine,
 	ipValue := reflect.ValueOf(ip).Elem()
 	ipAddress := ipValue.FieldByName("IpAddress")
 	if ipAddress.CanSet() || ipAddress.IsValid() {
-		ipAddress.SetString(vm.NetworkSettings.Ip)
+		ipAddress.SetString(vm.NetworkSetting.Ip)
 	}
-	nicSetting.Adapter.SubnetMask = vm.NetworkSettings.SubnetMask
-	gateway := vm.NetworkSettings.Gateway
+	nicSetting.Adapter.SubnetMask = vm.NetworkSetting.SubnetMask
+	gateway := vm.NetworkSetting.Gateway
 	nicSetting.Adapter.Gateway = append(nicSetting.Adapter.Gateway, gateway)
 
 	// set dns server
-	if vm.NetworkSettings.DnsServer != "" {
-		dnsServerList := []string{vm.NetworkSettings.DnsServer}
+	if vm.NetworkSetting.DnsServer != "" {
+		dnsServerList := []string{vm.NetworkSetting.DnsServer}
 		for _, ip := range tempMo.Guest.IpStack {
 			dnsServerList = append(dnsServerList,
 				ip.DnsConfig.IpAddress...)
@@ -1735,7 +1735,7 @@ func IsClusterDrsEnabled(vm *VM) (bool, error) {
 		return false, err
 	}
 
-	drsEnabled := crMo.Configuration.DrsConfig.Enabled
+	drsEnabled := crMo.Configuration.DrsConfig.Enaearled
 	if drsEnabled != nil {
 		return *drsEnabled, nil
 	}
