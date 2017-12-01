@@ -942,7 +942,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		return fmt.Errorf("failed to retrieve cloned VM: %v", err)
 	}
 	if len(vm.Disks) > 0 {
-		if _, err = reconfigureVM(vm, vmMo); err != nil {
+		if err = reconfigureVM(vm, vmMo); err != nil {
 			return err
 		}
 	}
@@ -1024,7 +1024,7 @@ var getDatastoreForVm = func(vm *VM, vmMo *mo.VirtualMachine) ([]string,
 // reconfigureVM :reconfigureVM adds the disks to the vm and returns the vmdk
 // file names of the disks added
 // root disk datastore is used by default
-var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
+var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
 	var (
 		vDisk           *types.VirtualDisk
 		thinProvisioned bool
@@ -1032,25 +1032,27 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
 	)
 	vmObj := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 
-	devList1, err := vmObj.Device(vm.ctx)
-	if err != nil {
-		return nil, err
-	}
-
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	if vm.datastore == "" {
 		datastores, err := getDatastoreForVm(vm, vmMo)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		vm.datastore = util.ChooseRandomString(datastores)
 	}
 
-	for _, disk := range vm.Disks {
+	for index, disk := range vm.Disks {
+		// getting device list before adding this disk
+		devListBefore, err := vmObj.Device(vm.ctx)
+		if err != nil {
+			return fmt.Errorf("Failed to get devices before creating "+
+				"Disks[%d] {%v} : %v", index, disk, err)
+		}
+
 		// root disk datastore is used by default
 		if disk.Datastore == "" {
 			datastore = vm.datastore
@@ -1059,15 +1061,18 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
 		}
 		devices, err := vmObj.Device(vm.ctx)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("Failed to get devices while creating "+
+				"Disks[%d] {%v} : %v", index, disk, err)
 		}
 		controller, err := devices.FindDiskController(disk.Controller)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("Failed to get controller while creating "+
+				"Disks[%d] {%v} : %v", index, disk, err)
 		}
 		dsMo, err := findDatastore(vm, dcMo, datastore)
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("Failed to get datastore while creating "+
+				"Disks[%d] {%v} : %v", index, disk, err)
 		}
 		if strings.ToLower(disk.Provisioning) == "thick" {
 			thinProvisioned = false
@@ -1078,17 +1083,22 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) ([]string, error) {
 			thinProvisioned)
 		vDisk.CapacityInKB = disk.Size
 		if err := vmObj.AddDevice(vm.ctx, vDisk); err != nil {
-			return nil, err
+			return fmt.Errorf("Failed to add device while creating "+
+				"Disks[%d] {%v} : %v", index, disk, err)
 		}
+
+		// getting device list after adding disk and setting appropriate
+		// vmdk filename to DiskName
+		devListAfter, err := vmObj.Device(vm.ctx)
+		if err != nil {
+			return fmt.Errorf("Failed to get devices after creating "+
+				"Disks[%d] {%v} : %v", index, disk, err)
+		}
+		vmdkFilename := diffDisks(devListAfter, devListBefore)
+		vm.Disks[index].DiskName = vmdkFilename[0]
 	}
 
-	devList2, err := vmObj.Device(vm.ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	disks := diffDisks(devList2, devList1)
-	return disks, nil
+	return nil
 }
 
 var waitForIP = func(vm *VM, vmMo *mo.VirtualMachine) error {
