@@ -1610,10 +1610,13 @@ func GetTemplateList(vm *VM) ([]map[string]interface{}, error) {
 						continue
 					}
 					devinfo := disk.DeviceInfo
+					backing := disk.Backing
+					fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
 					if di, ok := devinfo.(*types.Description); ok {
 						diskInfo = append(diskInfo, map[string]interface{}{
-							"name": di.Label,
-							"size": disk.CapacityInKB,
+							"name":      di.Label,
+							"size":      disk.CapacityInKB,
+							"disk_file": fileBackingInfo.FileName,
 						})
 					}
 				}
