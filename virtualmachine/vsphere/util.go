@@ -1800,7 +1800,7 @@ func IsClusterDrsEnabled(vm *VM) (bool, error) {
 		return false, err
 	}
 
-	drsEnabled := crMo.Configuration.DrsConfig.Enaearled
+	drsEnabled := crMo.Configuration.DrsConfig.Enabled
 	if drsEnabled != nil {
 		return *drsEnabled, nil
 	}
