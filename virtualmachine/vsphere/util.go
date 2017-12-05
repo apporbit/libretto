@@ -594,7 +594,7 @@ func removeExistingNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseV
 	return removeSpecs, nil
 }
 
-func FindByVirtualDeviceFileName(disks []Disk, name string) *Disk {
+func findByVirtualDeviceFileName(disks []Disk, name string) *Disk {
 	for _, disk := range disks {
 		if disk.DiskName == name {
 			return &disk
@@ -603,6 +603,7 @@ func FindByVirtualDeviceFileName(disks []Disk, name string) *Disk {
 	return nil
 }
 
+// Function which will resize or delete the existing volume in vmware template
 func resizeAndDeleteVols(vmMo mo.VirtualMachine, disks []Disk) ([]types.BaseVirtualDeviceConfigSpec, error) {
 	var deviceSpecs []types.BaseVirtualDeviceConfigSpec
 	devices := object.VirtualDeviceList(vmMo.Config.Hardware.Device)
@@ -610,10 +611,10 @@ func resizeAndDeleteVols(vmMo mo.VirtualMachine, disks []Disk) ([]types.BaseVirt
 		if editdisk, ok := device.(*types.VirtualDisk); ok {
 			backing := editdisk.Backing
 			fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
-			disk := FindByVirtualDeviceFileName(disks, fileBackingInfo.FileName)
+			disk := findByVirtualDeviceFileName(disks, fileBackingInfo.FileName)
 			var dvconfig types.BaseVirtualDeviceConfigSpec
 			if disk == nil {
-				// if user wants to delete the disk
+				// If user wants to delete the disk
 				dvconfig = &types.VirtualDeviceConfigSpec{
 					Operation: types.VirtualDeviceConfigSpecOperationRemove,
 					Device:    editdisk,
@@ -622,9 +623,10 @@ func resizeAndDeleteVols(vmMo mo.VirtualMachine, disks []Disk) ([]types.BaseVirt
 			} else {
 				capacityInKB := int64(disk.Size * 1024 * 1024)
 				if editdisk.CapacityInKB > capacityInKB {
-					//If user wants to shrink the disk capacity
+					// If user wants to shrink the disk capacity
 					return nil, fmt.Errorf("error : Shrinking Virtual Disks is not supported")
 				} else if editdisk.CapacityInKB < capacityInKB {
+					// If user wants to expand the virtual disk capacity
 					editdisk.CapacityInKB = capacityInKB
 					dvconfig = &types.VirtualDeviceConfigSpec{
 						Device:    editdisk,

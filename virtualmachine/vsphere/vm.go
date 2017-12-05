@@ -533,7 +533,7 @@ type VM struct {
 	SkipExisting int
 	// Credentials are the credentials to use when connecting to the VM over SSH
 	Credentials ssh.Credentials
-	//FixedDisks is a slice of existing disks which user wants to either expand/delete from VM
+	// FixedDisks is a slice of existing disks which user wants to either expand/delete from VM
 	FixedDisks []Disk
 	// Disks is a slice of extra disks to attach to the VM
 	Disks []Disk
