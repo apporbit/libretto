@@ -804,6 +804,19 @@ func (vm *VM) Destroy() (err error) {
 	}
 	defer vm.cancel()
 
+	// Get a reference to the datacenter with host and vm folders populated
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return err
+	}
+	exists, err := Exists(vm, dcMo, vm.Name)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+
 	state, err := getState(vm)
 	if err != nil {
 		return err
@@ -861,11 +874,6 @@ func (vm *VM) Destroy() (err error) {
 		}
 	}
 
-	// Get a reference to the datacenter with host and vm folders populated
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return err
-	}
 	vmMo, err := findVM(vm, dcMo, vm.Name)
 	if err != nil {
 		return err
