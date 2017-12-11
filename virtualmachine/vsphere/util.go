@@ -393,7 +393,7 @@ var createRequest = func(r io.Reader, method string, insecure bool, length int64
 
 // findVM finds the vm Managed Object referenced by the name or returns an error if it is not found.
 var findVM = func(vm *VM, dc *mo.Datacenter, name string) (*mo.VirtualMachine, error) {
-	moVM, err := searchTree(vm, dc.VmFolder, name)
+	moVM, err := searchTree(vm, &dc.VmFolder, name)
 	if err != nil {
 		return moVM, err
 	}
@@ -404,43 +404,119 @@ var findVM = func(vm *VM, dc *mo.Datacenter, name string) (*mo.VirtualMachine, e
 	return moVM, vm.answerQuestion(moVM)
 }
 
-func searchTree(vm *VM, mor types.ManagedObjectReference, name string) (*mo.VirtualMachine, error) {
-	switch mor.Type {
-	case "Folder":
+// splitPathToList: splits path containing special character including delimiter
+// for slash "/" (\/) and return slice of strings containing folder/vm names
+// for eg:  "vms\/test\/rec/rec\/1/rhel\/template\/vm"	: [vms/test/rec rec/1 rhel/template/vm]
+// Directory structure: vm/test/rec -> rec/1 -> rhel/template/vm
+func splitPathToList(path string) []string {
+	pathList := make([]string, 0)
+
+	// split at escaped '/'
+	// if no escaped '/' are present length of returned slice will be 1
+	slashInName := strings.SplitN(path, "\\/", 2)
+
+	// split at '/' (path separator) and append to pathList to return
+	pathList = append(pathList, strings.Split(slashInName[0], "/")...)
+
+	// if there are no escaped '/'
+	if len(slashInName) == 1 {
+		return pathList
+	}
+
+	// look for more escaped '/' in 2nd part of string
+	morePathList := splitPathToList(slashInName[1])
+	lPathList := len(pathList)
+
+	// join the path splitted at escaped '/'
+	pathList[lPathList-1] += "/" + morePathList[0]
+	pathList = append(pathList, morePathList[1:]...)
+	return pathList
+}
+
+// searchTree: searches for vm/template at a given path
+func searchTree(vm *VM, mor *types.ManagedObjectReference, name string) (
+	*mo.VirtualMachine, error) {
+	var (
+		ref types.ManagedObjectReference
+	)
+
+	// splits path to list of folder and vm names
+	pathList := splitPathToList(name)
+	lPathList := len(pathList)
+
+	iPathList := 0
+	for mor != nil {
 		// Fetch the childEntity property of the folder and check them
 		folderMo := mo.Folder{}
-		err := vm.collector.RetrieveOne(vm.ctx, mor, []string{"childEntity"}, &folderMo)
+		err := vm.collector.RetrieveOne(vm.ctx, *mor, []string{
+			"childEntity"}, &folderMo)
 		if err != nil {
 			return nil, err
 		}
+
+		mor = nil
 		for _, child := range folderMo.ChildEntity {
-			m, e := searchTree(vm, child, name)
-			if e != nil {
-				if _, ok := e.(ErrorObjectNotFound); !ok {
-					return nil, e
+			switch child.Type {
+			case "Folder":
+				// skip if looking for vm/template
+				if iPathList == lPathList-1 {
+					continue
+				}
+				childMo := mo.Folder{}
+				err = vm.collector.RetrieveOne(vm.ctx, child,
+					[]string{"name"}, &childMo)
+				if err != nil {
+					return nil, err
+				}
+
+				// unescaping to convert any escaped character
+				childName, err := url.QueryUnescape(
+					childMo.Name)
+				if err != nil {
+					return nil, err
+				}
+				if childName == pathList[iPathList] {
+					iPathList++
+					ref = child
+					mor = &ref
+					break
+				}
+			case "VirtualMachine":
+				// skip if looking for folder
+				if iPathList != lPathList-1 {
+					continue
+				}
+				// Base recursive case, compare for value
+				vmMo := mo.VirtualMachine{}
+				err := vm.collector.RetrieveOne(vm.ctx, child,
+					[]string{"name", "config", "datastore",
+						"guest",
+						"snapshot.currentSnapshot",
+						"summary", "runtime"}, &vmMo)
+				if err != nil {
+					return nil, NewErrorObjectNotFound(
+						errors.New(
+							"could not find vm"),
+						name)
+				}
+				// unescaping to convert any escaped character
+				vmName, err := url.QueryUnescape(vmMo.Name)
+				if err != nil {
+					return nil, err
+				}
+				if vmName == pathList[iPathList] {
+					return &vmMo, nil
 				}
 			}
-			if m != nil {
-				return m, nil
-			}
 		}
-	case "VirtualMachine":
-		// Base recursive case, compare for value
-		vmMo := mo.VirtualMachine{}
-		err := vm.collector.RetrieveOne(vm.ctx, mor, []string{"name",
-			"config", "datastore", "guest.ipAddress",
-			"guest.guestState", "guest.net", "runtime.question",
-			"snapshot.currentSnapshot", "guest.toolsRunningStatus",
-			"summary", "runtime"}, &vmMo)
-		if err != nil {
-			return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
+
+		if mor == nil {
+			return nil, NewErrorObjectNotFound(errors.New(
+				"could not find the vm"), name)
 		}
-		if vmMo.Name == name {
-			return &vmMo, nil
-		}
-		return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
 	}
-	return nil, NewErrorObjectNotFound(errors.New("could not find the vm"), name)
+	return nil, NewErrorObjectNotFound(errors.New("could not find the vm"),
+		name)
 }
 
 func getEthernetBacking(vm *VM, nwMor types.ManagedObjectReference,

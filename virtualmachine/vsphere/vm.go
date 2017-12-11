@@ -1404,27 +1404,86 @@ func GetDcImageList(vm *VM) (map[string][]string, error) {
 }
 
 // getDcVMList : returns list of VirtualMachine objects in a Datacenter
-func getDcVMList(vm *VM, datacenter *object.Datacenter) ([]mo.VirtualMachine, error) {
-	var allVmsMo []mo.VirtualMachine
-
+func getDcVMList(vm *VM, datacenter *object.Datacenter) (
+	map[string]mo.VirtualMachine, error) {
 	// Set datacenter
 	vm.finder.SetDatacenter(datacenter)
-	// find the virtual machines in selected datacenter
-	allVms, err := vm.finder.VirtualMachineList(vm.ctx, "*")
+	folders, err := datacenter.Folders(vm.ctx)
 	if err != nil {
-		switch err.(type) {
-		case *find.NotFoundError:
-			return allVmsMo, nil
-		}
 		return nil, err
 	}
-	var vmsMor []types.ManagedObjectReference
-	for _, vm := range allVms {
-		vmsMor = append(vmsMor, vm.Reference())
+	// datacenter's vmFolder has all the vms in all the clusters/hosts in
+	// that datacetner, returning the vm in datacenter vmfolder
+	return getVmsInFolder(vm, folders.VmFolder, "")
+}
+
+// getVmsInFolder: returns map of full path and mo.Virtualmachine struct of vms
+// in a vcenter vm folder
+func getVmsInFolder(vm *VM, folder *object.Folder, path string) (
+	map[string]mo.VirtualMachine, error) {
+	var (
+		allVms map[string]mo.VirtualMachine
+	)
+	allVms = make(map[string]mo.VirtualMachine)
+	// get list of folders/vms/templates in folder
+	children, err := folder.Children(vm.ctx)
+	if err != nil {
+		return nil, err
 	}
-	// get the vm names and config
-	err = vm.collector.Retrieve(vm.ctx, vmsMor, []string{"name", "config", "summary"}, &allVmsMo)
-	return allVmsMo, err
+	for _, entity := range children {
+		mor := entity.Reference()
+		switch mor.Type {
+		// if child is a folder, look for vms in the folder recursively
+		// and add to the hash
+		case "Folder":
+			// Fetch the childEntity property of the folder
+			folderMo := mo.Folder{}
+			err := vm.collector.RetrieveOne(vm.ctx, mor, []string{
+				"name"}, &folderMo)
+			if err != nil {
+				return nil, err
+			}
+			// unescaping to convert any escaped character
+			folderName, err := url.QueryUnescape(folderMo.Name)
+			if err != nil {
+				return nil, err
+			}
+			// Adding delimitter in case "/" is present in name
+			folderName = strings.Replace(folderName, "/", "\\/",
+				-1)
+			folder := object.NewFolder(vm.client.Client,
+				mor)
+			// gettings vm in folder recursively
+			vms, err := getVmsInFolder(vm, folder,
+				path+folderName+"/")
+			if err != nil {
+				return nil, err
+			}
+			// updating the allVMs hash
+			for name, vmMo := range vms {
+				allVms[name] = vmMo
+			}
+		case "VirtualMachine":
+			// if child is vm/template, return the full path and
+			// mo of the vm
+			vmMo := mo.VirtualMachine{}
+			err := vm.collector.RetrieveOne(vm.ctx, mor, []string{
+				"name", "config", "runtime", "summary"}, &vmMo)
+			if err != nil {
+				return nil, err
+			}
+			// unescaping to convert any escaped character
+			vmName, err := url.QueryUnescape(vmMo.Name)
+			if err != nil {
+				return nil, err
+			}
+			// Adding delimitter in case "/" is present in name
+			vmName = path + strings.Replace(vmName, "/", "\\/",
+				-1)
+			allVms[vmName] = vmMo
+		}
+	}
+	return allVms, nil
 }
 
 // GetDcClusterList : GetDcClusterList returns the clusters in the datacenter
@@ -1461,7 +1520,9 @@ func GetDcClusterList(vm *VM) ([]ClusterComputeResource, error) {
 	}
 	// get the cluster names
 	var allClustersMo []mo.ClusterComputeResource
-	err = vm.collector.Retrieve(vm.ctx, clustersMor, []string{"name", "summary", "configuration", "host", "datastore", "network"}, &allClustersMo)
+	err = vm.collector.Retrieve(vm.ctx, clustersMor, []string{"name",
+		"summary", "configuration", "host", "datastore", "network"},
+		&allClustersMo)
 	if err != nil {
 		return nil, err
 	}
@@ -1542,7 +1603,8 @@ func GetHostList(vm *VM) ([]HostSystem, error) {
 		return nil, err
 	}
 	// find the Destination cluster
-	crMo, err := findClusterComputeResource(vm, dcMo, vm.Destination.DestinationName)
+	crMo, err := findClusterComputeResource(vm, dcMo,
+		vm.Destination.DestinationName)
 	if err != nil {
 		return nil, err
 	}
@@ -1551,7 +1613,8 @@ func GetHostList(vm *VM) ([]HostSystem, error) {
 	}
 	// get the host list in datacenter vm.Datacenter
 	for _, host := range crMo.Host {
-		err := vm.collector.RetrieveOne(vm.ctx, host, []string{"name", "summary", "runtime"}, &hsMo)
+		err := vm.collector.RetrieveOne(vm.ctx, host, []string{"name",
+			"summary", "runtime"}, &hsMo)
 		if err != nil {
 			return nil, err
 		}
@@ -1598,90 +1661,115 @@ func GetTemplateList(vm *VM) ([]map[string]interface{}, error) {
 		return nil, err
 	}
 
-	if vmMoList != nil {
-		for _, vmo := range vmMoList {
-			// Filter out the templates
-			if vmo.Config != nil && vmo.Config.Template {
-				devices := vmo.Config.Hardware.Device
-				diskInfo := make([]map[string]interface{}, 0)
-				for _, device := range devices {
-					disk, ok := device.(*types.VirtualDisk)
-					if !ok {
-						continue
-					}
-					devinfo := disk.DeviceInfo
-					backing := disk.Backing
-					fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
-					if di, ok := devinfo.(*types.Description); ok {
-						diskInfo = append(diskInfo, map[string]interface{}{
-							"name":      di.Label,
-							"size":      disk.CapacityInKB,
-							"disk_file": fileBackingInfo.FileName,
-						})
-					}
-				}
-				vmList = append(vmList, map[string]interface{}{
-					"name":           vmo.Name,
-					"id":             vmo.Self.Value,
-					"disks":          diskInfo,
-					"nic_info":       getNicInfo(vmo),
-					"memory_size_mb": vmo.Summary.Config.MemorySizeMB,
-					"num_cpu":        vmo.Summary.Config.NumCpu,
-				})
-			}
+	if vmMoList == nil {
+		return vmList, nil
+	}
+	for name, vmo := range vmMoList {
+		// Filter out the templates
+		if vmo.Config != nil && !vmo.Config.Template {
+			continue
 		}
+		// fetching fisk info
+		diskInfo := make([]map[string]interface{}, 0)
+		for _, device := range vmo.Config.Hardware.Device {
+			disk, ok := device.(*types.VirtualDisk)
+			if !ok {
+				continue
+			}
+			devinfo, ok := disk.DeviceInfo.(*types.Description)
+			if !ok {
+				continue
+			}
+			backing := disk.Backing
+			fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
+			diskInfo = append(diskInfo, map[string]interface{}{
+				"name":      devinfo.Label,
+				"size":      disk.CapacityInKB,
+				"disk_file": fileBackingInfo.FileName,
+			})
+		}
+		vmList = append(vmList, map[string]interface{}{
+			"name":           name, // full name/path of vm
+			"id":             vmo.Self.Value,
+			"disks":          diskInfo,
+			"nic_info":       getNicInfo(vmo),
+			"memory_size_mb": vmo.Summary.Config.MemorySizeMB,
+			"num_cpu":        vmo.Summary.Config.NumCpu,
+		})
 	}
 	return vmList, nil
 }
 
-// getVirtualMachines : Return the virtual machines in a cluster
-func getVirtualMachines(vm *VM) ([]mo.VirtualMachine, error) {
+// getVirtualMachines : Returns the virtual machines in a dc/cluster/host
+func getVirtualMachines(vm *VM) (map[string]mo.VirtualMachine, error) {
 	var (
-		vmList          []mo.VirtualMachine
-		virtualMachines []mo.VirtualMachine
-		hsMo            mo.HostSystem
+		hsMos []mo.HostSystem
+		hsMo  mo.HostSystem
 	)
+	vmsInDc := make(map[string]mo.VirtualMachine)
+	vmsInCluster := make(map[string]mo.VirtualMachine)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
 		return nil, err
 	}
 
+	// Return virtual machines for the whole datacenter
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return nil, err
+	}
+
+	dcObj := object.NewDatacenter(vm.client.Client,
+		dcMo.Reference())
+	vmsInDc, err = getDcVMList(vm, dcObj)
+	if err != nil {
+		return nil, err
+	}
+
+	// if cluster name not given, return vms in datacenter
 	if vm.Destination.DestinationName == "" {
-		// Return virtual machines for the whole datacenter
-		dcMo, err := GetDatacenter(vm)
+		return vmsInDc, nil
+	}
+
+	// using hostsLookup to check if a vm is related to a host in map
+	hostsLookup := make(map[string]bool)
+	// if host is provided update the hostsLookup map to have one host only
+	if vm.Destination.HostSystem != "" {
+		hostsLookup = map[string]bool{
+			vm.Destination.HostSystem: false,
+		}
+	} else {
+		// Get the cluster resource and its host
+		crMo, err := findClusterComputeResource(vm, dcMo,
+			vm.Destination.DestinationName)
 		if err != nil {
 			return nil, err
 		}
-
-		dcObj := object.NewDatacenter(vm.client.Client, dcMo.Reference())
-		return getDcVMList(vm, dcObj)
-	}
-
-	// set up session to vcenter server
-	dc, err := GetDatacenter(vm)
-	if err != nil {
-		return nil, err
-	}
-
-	// Get the cluster resource and its host, datastore and datastore
-	crMo, err := findClusterComputeResource(vm, dc, vm.Destination.DestinationName)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, host := range crMo.Host {
-		err = vm.collector.RetrieveOne(vm.ctx, host, []string{"name", "vm"}, &hsMo)
+		// get the hosts in cluster
+		err = vm.collector.Retrieve(vm.ctx, crMo.Host, []string{"name"},
+			&hsMos)
 		if err != nil {
 			return nil, err
 		}
+		for _, host := range hsMos {
+			hostsLookup[host.Name] = false
+		}
+	}
 
-		err = vm.collector.Retrieve(vm.ctx, hsMo.Vm, []string{"name", "config", "summary"}, &virtualMachines)
+	for path, vmMo := range vmsInDc {
+		if vmMo.Runtime.Host == nil {
+			continue
+		}
+		err = vm.collector.RetrieveOne(vm.ctx, *vmMo.Runtime.Host,
+			[]string{"name"}, &hsMo)
 		if err != nil {
 			return nil, err
 		}
-		vmList = append(vmList, virtualMachines...)
+		if _, ok := hostsLookup[hsMo.Name]; ok {
+			vmsInCluster[path] = vmMo
+		}
 	}
-	return vmList, nil
+	return vmsInCluster, nil
 }
 
 // ConvertToTemplate : converts vm to vm template
