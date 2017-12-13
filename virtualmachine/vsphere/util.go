@@ -393,7 +393,17 @@ var createRequest = func(r io.Reader, method string, insecure bool, length int64
 
 // findVM finds the vm Managed Object referenced by the name or returns an error if it is not found.
 var findVM = func(vm *VM, dc *mo.Datacenter, name string) (*mo.VirtualMachine, error) {
-	moVM, err := searchTree(vm, &dc.VmFolder, name)
+	if strings.HasPrefix(name, "/") {
+		dcPath := fmt.Sprintf("/%s/vm/", dc.Name)
+		if !strings.HasPrefix(name, dcPath) {
+			err := fmt.Errorf("vm: %s not present in datacenter: %s",
+				name, dc.Name)
+			return nil, NewErrorObjectNotFound(err, name)
+		}
+		name = strings.TrimPrefix(name, dcPath)
+	}
+	vmFolder := object.NewFolder(vm.client.Client, dc.VmFolder)
+	moVM, err := searchTree(vm, vmFolder, name)
 	if err != nil {
 		return moVM, err
 	}
@@ -404,91 +414,62 @@ var findVM = func(vm *VM, dc *mo.Datacenter, name string) (*mo.VirtualMachine, e
 	return moVM, vm.answerQuestion(moVM)
 }
 
-// splitPathToList: splits path containing special character including delimiter
-// for slash "/" (\/) and return slice of strings containing folder/vm names
-// for eg:  "vms\/test\/rec/rec\/1/rhel\/template\/vm"	: [vms/test/rec rec/1 rhel/template/vm]
-// Directory structure: vm/test/rec -> rec/1 -> rhel/template/vm
-func splitPathToList(path string) []string {
-	pathList := make([]string, 0)
-
-	// split at escaped '/'
-	// if no escaped '/' are present length of returned slice will be 1
-	slashInName := strings.SplitN(path, "\\/", 2)
-
-	// split at '/' (path separator) and append to pathList to return
-	pathList = append(pathList, strings.Split(slashInName[0], "/")...)
-
-	// if there are no escaped '/'
-	if len(slashInName) == 1 {
-		return pathList
+func searchTree(vm *VM, folder *object.Folder, name string) (
+	*mo.VirtualMachine, error) {
+	vmObj, err := vm.finder.VirtualMachine(vm.ctx, name)
+	if err != nil {
+		return nil, err
 	}
-
-	// look for more escaped '/' in 2nd part of string
-	morePathList := splitPathToList(slashInName[1])
-	lPathList := len(pathList)
-
-	// join the path splitted at escaped '/'
-	pathList[lPathList-1] += "/" + morePathList[0]
-	pathList = append(pathList, morePathList[1:]...)
-	return pathList
+	vmMo := new(mo.VirtualMachine)
+	err = vm.collector.RetrieveOne(vm.ctx, vmObj.Reference(),
+		[]string{"name", "config", "datastore", "guest", "runtime",
+			"snapshot.currentSnapshot", "summary"}, vmMo)
+	if err != nil {
+		return nil, NewErrorObjectNotFound(errors.New(
+			"could not find vm"), name)
+	}
+	return vmMo, nil
 }
 
 // searchTree: searches for vm/template at a given path
-func searchTree(vm *VM, mor *types.ManagedObjectReference, name string) (
+// name: path of the vm relative to folder /dcName/vm/
+func searchTree11(vm *VM, folder *object.Folder, name string) (
 	*mo.VirtualMachine, error) {
 	var (
-		ref types.ManagedObjectReference
+		vmObj object.VirtualMachine
 	)
 
 	// splits path to list of folder and vm names
-	pathList := splitPathToList(name)
+	pathList := strings.Split(name, "/")
 	lPathList := len(pathList)
 
-	iPathList := 0
-	for mor != nil {
+	for iPathList, name := range pathList {
 		// Fetch the childEntity property of the folder and check them
-		folderMo := mo.Folder{}
-		err := vm.collector.RetrieveOne(vm.ctx, *mor, []string{
-			"childEntity"}, &folderMo)
+		children, err := folder.Children(vm.ctx)
 		if err != nil {
 			return nil, err
 		}
-
-		mor = nil
-		for _, child := range folderMo.ChildEntity {
-			switch child.Type {
-			case "Folder":
+		folder = nil
+		for _, child := range children {
+			switch c := child.(type) {
+			case *object.Folder:
 				// skip if looking for vm/template
 				if iPathList == lPathList-1 {
 					continue
 				}
-				childMo := mo.Folder{}
-				err = vm.collector.RetrieveOne(vm.ctx, child,
-					[]string{"name"}, &childMo)
-				if err != nil {
-					return nil, err
-				}
-
-				// unescaping to convert any escaped character
-				childName, err := url.QueryUnescape(
-					childMo.Name)
-				if err != nil {
-					return nil, err
-				}
-				if childName == pathList[iPathList] {
+				if c.Name() == pathList[iPathList] {
 					iPathList++
-					ref = child
-					mor = &ref
+					folder = c
 					break
 				}
-			case "VirtualMachine":
+			case *object.VirtualMachine:
 				// skip if looking for folder
 				if iPathList != lPathList-1 {
 					continue
 				}
 				// Base recursive case, compare for value
 				vmMo := mo.VirtualMachine{}
-				err := vm.collector.RetrieveOne(vm.ctx, child,
+				err := vm.collector.RetrieveOne(vm.ctx, c.Reference(),
 					[]string{"name", "config", "datastore",
 						"guest",
 						"snapshot.currentSnapshot",
@@ -499,18 +480,13 @@ func searchTree(vm *VM, mor *types.ManagedObjectReference, name string) (
 							"could not find vm"),
 						name)
 				}
-				// unescaping to convert any escaped character
-				vmName, err := url.QueryUnescape(vmMo.Name)
-				if err != nil {
-					return nil, err
-				}
-				if vmName == pathList[iPathList] {
+				if vmMo.Name == pathList[iPathList] {
 					return &vmMo, nil
 				}
 			}
 		}
 
-		if mor == nil {
+		if folder == nil {
 			return nil, NewErrorObjectNotFound(errors.New(
 				"could not find the vm"), name)
 		}
