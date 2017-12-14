@@ -435,10 +435,6 @@ func searchTree(vm *VM, folder *object.Folder, name string) (
 // name: path of the vm relative to folder /dcName/vm/
 func searchTree11(vm *VM, folder *object.Folder, name string) (
 	*mo.VirtualMachine, error) {
-	var (
-		vmObj object.VirtualMachine
-	)
-
 	// splits path to list of folder and vm names
 	pathList := strings.Split(name, "/")
 	lPathList := len(pathList)

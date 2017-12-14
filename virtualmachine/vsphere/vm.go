@@ -53,6 +53,10 @@ func (v vmwareFinder) VirtualMachineList(c context.Context, p string) ([]*object
 	return v.finder.VirtualMachineList(c, p)
 }
 
+func (v vmwareFinder) VirtualMachine(c context.Context, p string) (*object.VirtualMachine, error) {
+	return v.finder.VirtualMachine(c, p)
+}
+
 func (v vmwareFinder) ClusterComputeResourceList(c context.Context, p string) ([]*object.ClusterComputeResource, error) {
 	return v.finder.ClusterComputeResourceList(c, p)
 }
@@ -425,6 +429,7 @@ type finder interface {
 	DatacenterList(context.Context, string) ([]*object.Datacenter, error)
 	ClusterComputeResourceList(context.Context, string) ([]*object.ClusterComputeResource, error)
 	VirtualMachineList(context.Context, string) ([]*object.VirtualMachine, error)
+	VirtualMachine(context.Context, string) (*object.VirtualMachine, error)
 	NetworkList(context.Context, string) ([]object.NetworkReference, error)
 	SetDatacenter(*object.Datacenter) *find.Finder
 }
@@ -1402,12 +1407,18 @@ func GetDcImageList(vm *VM) (map[string][]string, error) {
 	for _, dc := range dcList {
 		vmObjs, err := getVmsInDc(vm, dc)
 		if err != nil {
+			switch err.(type) {
+			case *find.NotFoundError:
+				continue
+			}
 			return nil, err
 		}
 		if vmObjs == nil {
 			continue
 		}
 		vmMap := make(map[string]string)
+		mors := make([]types.ManagedObjectReference, 0)
+		vmMos := make([]mo.VirtualMachine, 0)
 		// generate response for the images in datacenter. In the response map
 		// the key is the datacenter name and value is the list of images in datacenter
 		for _, obj := range vmObjs {
@@ -1705,10 +1716,9 @@ func GetVmList(vm *VM, template bool) ([]map[string]interface{}, error) {
 // getVirtualMachines : Returns the virtual machines in a dc/cluster/host
 func getVirtualMachines(vm *VM) ([]object.VirtualMachine, error) {
 	var (
-		vmsInDc      *[]object.VirtualMachine
-		vmsInCluster *[]object.VirtualMachine
+		vmsInDc      []*object.VirtualMachine
+		vmsInCluster []*object.VirtualMachine
 		hsMos        []mo.HostSystem
-		hsMo         mo.HostSystem
 	)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
