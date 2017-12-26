@@ -757,22 +757,23 @@ func getNicInfo(vmMo mo.VirtualMachine) []VirtualEthernetCard {
 	return nicInfo
 }
 
-// GetIPsAndId returns the IPs and reference Id of this VM. Returns all the IPs known to the API for
-// the different network cards for this VM. Includes IPV4 and IPV6 addresses.
-func (vm *VM) GetIPsAndId() ([]net.IP, string, error) {
+// GetIPsAndIds returns the IPs, reference Id and instance uuid of this VM.
+// Returns all the IPs known to the API for the different network cards
+// for this VM. Includes IPV4 and IPV6 addresses.
+func (vm *VM) GetIPsAndIds() ([]net.IP, string, string, error) {
 	if err := SetupSession(vm); err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	defer vm.cancel()
 
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	vmMo, err := findVM(vm, dcMo, vm.Name)
 	if err != nil {
-		return nil, "", err
+		return nil, "", "", err
 	}
 	// Lazy initialized when there is an IP address later.
 	var ips []net.IP
@@ -794,13 +795,14 @@ func (vm *VM) GetIPsAndId() ([]net.IP, string, error) {
 			ips = append(ips, ip)
 		}
 	}
-	return ips, vmMo.Self.Value, nil
+
+	return ips, vmMo.Self.Value, vmMo.Summary.Config.InstanceUuid, nil
 }
 
 // GetIPs returns the IPs of this VM. Returns all the IPs known to the API for
 // the different network cards for this VM. Includes IPV4 and IPV6 addresses.
 func (vm *VM) GetIPs() ([]net.IP, error) {
-	ips, _, err := vm.GetIPsAndId()
+	ips, _, _, err := vm.GetIPsAndIds()
 	return ips, err
 }
 
@@ -964,7 +966,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 		return vmInfo, err
 	}
 
-	ips, vmid, err := vm.GetIPsAndId()
+	ips, vmid, _, err := vm.GetIPsAndIds()
 	toolsRunningStatus := getToolsRunningStatus(vmMo.Guest.ToolsRunningStatus)
 
 	vmInfo.VMId = vmid
