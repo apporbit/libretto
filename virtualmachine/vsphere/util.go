@@ -1046,13 +1046,6 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
 	}
 
 	for index, disk := range vm.Disks {
-		// getting device list before adding this disk
-		devListBefore, err := vmObj.Device(vm.ctx)
-		if err != nil {
-			return fmt.Errorf("Failed to get devices before creating "+
-				"Disks[%d] {%v} : %v", index, disk, err)
-		}
-
 		// root disk datastore is used by default
 		if disk.Datastore == "" {
 			datastore = vm.datastore
@@ -1079,6 +1072,10 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
 		} else {
 			thinProvisioned = true
 		}
+
+		// getting device list before adding this disk
+		devListBefore := devices
+
 		vDisk = CreateDisk(devices, controller, dsMo.Reference(), "",
 			thinProvisioned)
 		vDisk.CapacityInKB = disk.Size
@@ -1089,12 +1086,12 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
 
 		// getting device list after adding disk and setting appropriate
 		// vmdk filename to DiskName
-		devListAfter, err := vmObj.Device(vm.ctx)
+		devices, err = vmObj.Device(vm.ctx)
 		if err != nil {
 			return fmt.Errorf("Failed to get devices after creating "+
 				"Disks[%d] {%v} : %v", index, disk, err)
 		}
-		vmdkFilename := diffDisks(devListAfter, devListBefore)
+		vmdkFilename := diffDisks(devices, devListBefore)
 		vm.Disks[index].DiskName = vmdkFilename[0]
 	}
 
