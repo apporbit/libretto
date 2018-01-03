@@ -722,7 +722,7 @@ func (vm *VM) RemoveDisk() error {
 			switch device := d.(type) {
 			case *types.VirtualDisk:
 				fileName := d.GetVirtualDevice().Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
-				if strings.HasSuffix(fileName, disk.DiskName) {
+				if fileName == disk.DiskName {
 					deviceMo = device
 					break
 				}
