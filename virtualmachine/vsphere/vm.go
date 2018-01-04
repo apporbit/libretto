@@ -37,6 +37,16 @@ const (
 	SKIPTEMPLATE_ERROR = iota
 	SKIPTEMPLATE_OVERWRITE
 	SKIPTEMPLATE_USE
+
+	// Constants for supproted values for Flavor:Name
+	FlavorSmall   = "small"
+	FlavorMedium  = "medium"
+	FlavorLarge   = "large"
+	FlavorXLarge  = "xlarge"
+	Flavor2XLarge = "2xlarge"
+	Flavor4XLarge = "4xlarge"
+	Flavor8XLarge = "8xlarge"
+	FlavorCustom  = "custom"
 )
 
 type vmwareFinder struct {
@@ -488,6 +498,7 @@ type VirtualEthernetCard struct {
 
 type VMInfo struct {
 	VMId               string
+	InstanceId         string
 	IpAddress          []net.IP
 	ToolsRunningStatus bool
 	OverallCpuUsage    int64
@@ -501,6 +512,9 @@ type VMInfo struct {
 }
 
 type Flavor struct {
+	// Flavor name. Supported values are defined as
+	// constants [FlavorLarge, FlavorSmall, FlavorMedium, FlavorCustom]
+	Name string
 	// Represents the number of CPUs
 	NumCPUs int32
 	// Represents the size of main memory in MB
@@ -546,7 +560,7 @@ type VM struct {
 	// the datastores that were passed in.
 	UseLocalTemplates bool
 	// SkipExisting when set to '2' lets Provision succeed even if the VM already exists.
-	SkipExisting int
+	SkipExisting *int
 	// Credentials are the credentials to use when connecting to the VM over SSH
 	Credentials ssh.Credentials
 	// FixedDisks is a slice of existing disks which user wants to either expand/delete from VM
@@ -562,15 +576,15 @@ type VM struct {
 	// linked clones.
 	UseLinkedClones bool
 	// Skip waiting for IP to be assigned to VM in create/start actions
-	SkipIPWait      bool
-	uri             *url.URL
-	ctx             context.Context
-	cancel          context.CancelFunc
-	client          *govmomi.Client
-	finder          finder
-	collector       collector
-	datastore       string
-	NetworkSettings lvm.NetworkSettings
+	SkipIPWait     bool
+	uri            *url.URL
+	ctx            context.Context
+	cancel         context.CancelFunc
+	client         *govmomi.Client
+	finder         finder
+	collector      collector
+	datastore      string
+	NetworkSetting lvm.NetworkSetting
 }
 
 // Provision provisions this VM.
@@ -610,7 +624,10 @@ func (vm *VM) Provision() (err error) {
 
 		// If it does exist, return an error if the skip existing is set to 0/SKIPTEMPLATE_ERROR
 		if e {
-			switch vm.SkipExisting {
+			if vm.SkipExisting == nil {
+				return fmt.Errorf("Mandatory parameter SkipExising not given")
+			}
+			switch *vm.SkipExisting {
 			case SKIPTEMPLATE_USE: //PASS
 			case SKIPTEMPLATE_ERROR:
 				return fmt.Errorf("Template already exists: %s", vm.Template)
@@ -785,32 +802,40 @@ func getIpFromVmMo(vmMo *mo.VirtualMachine) []net.IP {
 	return ips
 }
 
-// GetIPsAndId returns the IPs and reference Id of this VM. Returns all the IPs known to the API for
-// the different network cards for this VM. Includes IPV4 and IPV6 addresses.
-func (vm *VM) GetIPsAndId() ([]net.IP, string, error) {
+// GetIPsAndIds returns the IPs, reference Id and instance uuid of this VM.
+// Returns all the IPs known to the API for the different network cards
+// for this VM. Includes IPV4 and IPV6 addresses.
+func (vm *VM) GetIPsAndIds() (VMInfo, error) {
+	var vmInfo VMInfo
 	if err := SetupSession(vm); err != nil {
-		return nil, "", err
+		return vmInfo, err
 	}
 	defer vm.cancel()
 
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return nil, "", err
+		return vmInfo, err
 	}
 	vmMo, err := findVM(vm, dcMo, vm.Name)
 	if err != nil {
-		return nil, "", err
+		return vmInfo, err
 	}
 	ips := getIpFromVmMo(vmMo)
-	return ips, vmMo.Self.Value, nil
+
+	vmInfo = VMInfo{
+		VMId:       vmMo.Self.Value,
+		InstanceId: vmMo.Summary.Config.InstanceUuid,
+		IpAddress:  ips,
+	}
+	return vmInfo, nil
 }
 
 // GetIPs returns the IPs of this VM. Returns all the IPs known to the API for
 // the different network cards for this VM. Includes IPV4 and IPV6 addresses.
 func (vm *VM) GetIPs() ([]net.IP, error) {
-	ips, _, err := vm.GetIPsAndId()
-	return ips, err
+	vmInfo, err := vm.GetIPsAndIds()
+	return vmInfo.IpAddress, err
 }
 
 // Destroy deletes this VM from vSphere.
@@ -976,11 +1001,9 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 		return vmInfo, err
 	}
 
-	ips, vmid, err := vm.GetIPsAndId()
+	vmInfo, err := vm.GetIPsAndIds()
 	toolsRunningStatus := getToolsRunningStatus(vmMo.Guest.ToolsRunningStatus)
 
-	vmInfo.VMId = vmid
-	vmInfo.IpAddress = ips
 	vmInfo.ToolsRunningStatus = toolsRunningStatus
 	vmInfo.OverallCpuUsage = int64(vmMo.Summary.QuickStats.OverallCpuUsage)
 	vmInfo.GuestMemoryUsage = int64(vmMo.Summary.QuickStats.GuestMemoryUsage)
