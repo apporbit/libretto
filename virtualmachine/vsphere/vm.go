@@ -657,10 +657,10 @@ func (vm *VM) GetName() string {
 	return vm.Name
 }
 
-// AddDisk to the vm
-func (vm *VM) AddDisk() ([]string, error) {
+// AddDisk: adds given list of disks to the vm
+func (vm *VM) AddDisk() error {
 	if err := SetupSession(vm); err != nil {
-		return nil, fmt.Errorf("Error setting up vSphere session: %v", err)
+		return fmt.Errorf("Error setting up vSphere session: %v", err)
 	}
 
 	// Cancel the sdk context
@@ -669,13 +669,13 @@ func (vm *VM) AddDisk() ([]string, error) {
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
 	if err != nil {
-		return nil, fmt.Errorf("Failed to retrieve datacenter: %v", err)
+		return fmt.Errorf("Failed to retrieve datacenter: %v", err)
 	}
 
 	// Finds the vm with name vm.Name
 	vmMo, err := findVM(vm, dcMo, vm.Name)
 	if err != nil {
-		return nil, fmt.Errorf("VM :%s not found. Error : %v",
+		return fmt.Errorf("VM :%s not found. Error : %v",
 			vm.Name, err)
 	}
 
@@ -683,15 +683,17 @@ func (vm *VM) AddDisk() ([]string, error) {
 	vm.datastore = util.ChooseRandomString(vm.Datastores)
 
 	// Reconfigures vm with the new Disk
-	diskList, err := reconfigureVM(vm, vmMo)
+	err = reconfigureVM(vm, vmMo)
 	if err != nil {
-		return nil, fmt.Errorf("Reconfigure failed : %v", err)
+		return fmt.Errorf("Reconfigure failed : %v", err)
 	}
-	return diskList, nil
+
+	return nil
 }
 
-// RemoveDisk removes the disk attached to the virtualmachine 'vm', vmdkName is the name of the vmdk file for the disk
-func (vm *VM) RemoveDisk(vmdkFiles []string) error {
+// RemoveDisk: removes given list of disks attached to the virtualmachine 'vm'
+// disk.DiskName is the name of the vmdk file for the disk
+func (vm *VM) RemoveDisk() error {
 	var errorMessage string
 	if err := SetupSession(vm); err != nil {
 		return fmt.Errorf("Error setting up vSphere session: %v", err)
@@ -706,7 +708,7 @@ func (vm *VM) RemoveDisk(vmdkFiles []string) error {
 		return fmt.Errorf("Failed to retrieve datacenter: %v", err)
 	}
 
-	for _, vmdkName := range vmdkFiles {
+	for _, disk := range vm.Disks {
 		// finds the virtualmachine with name vm.Name
 		vmMo, err := findVM(vm, dcMo, vm.Name)
 		if err != nil {
@@ -720,7 +722,7 @@ func (vm *VM) RemoveDisk(vmdkFiles []string) error {
 			switch device := d.(type) {
 			case *types.VirtualDisk:
 				fileName := d.GetVirtualDevice().Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
-				if strings.HasSuffix(fileName, vmdkName) {
+				if fileName == disk.DiskName {
 					deviceMo = device
 					break
 				}
@@ -728,14 +730,14 @@ func (vm *VM) RemoveDisk(vmdkFiles []string) error {
 		}
 
 		if deviceMo == nil {
-			errorMessage += fmt.Sprintf("%s : No disk with name\n", vmdkName)
+			errorMessage += fmt.Sprintf("%s : No disk with name\n", disk.DiskName)
 			continue
 		}
 
 		// Creates the virtualmachine object to remove the disk
 		vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 		if err = vmo.RemoveDevice(vm.ctx, false, deviceMo); err != nil {
-			errorMessage += fmt.Errorf("%s : Delete disk task returned an error : %s \n", vmdkName, err).Error()
+			errorMessage += fmt.Errorf("%s : Delete disk task returned an error : %s \n", disk.DiskName, err).Error()
 		}
 	}
 	if errorMessage != "" {
