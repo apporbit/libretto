@@ -434,11 +434,11 @@ type collector interface {
 
 // Disk represents a vSphere Disk to attach to the VM
 type Disk struct {
-	Size         int64
-	Controller   string
-	Provisioning string
-	Datastore    string
-	DiskName     string
+	Size         int64  `json:"size,omitempty"`
+	Controller   string `json:"controller,omitempty"`
+	Provisioning string `json:"provisioning,omitempty"`
+	Datastore    string `json:"datastore,omitempty"`
+	DiskName     string `json:"disk_name,omitempty"`
 }
 
 // Snapshot represents a vSphere snapshot to create
@@ -1010,7 +1010,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 		return vmInfo, err
 	}
 
-	vmInfo, err := vm.GetIPsAndIds()
+	vmInfo, err = vm.GetIPsAndIds()
 	toolsRunningStatus := getToolsRunningStatus(vmMo.Guest.ToolsRunningStatus)
 
 	vmInfo.ToolsRunningStatus = toolsRunningStatus
