@@ -434,7 +434,7 @@ type Disk struct {
 	Controller   string `json:"controller,omitempty"`
 	Provisioning string `json:"provisioning,omitempty"`
 	Datastore    string `json:"datastore,omitempty"`
-	DiskName     string `json:"disk_name,omitempty"`
+	DiskName     string `json:"disk_file,omitempty"`
 }
 
 // Snapshot represents a vSphere snapshot to create
@@ -516,9 +516,9 @@ type Flavor struct {
 	// constants [FlavorLarge, FlavorSmall, FlavorMedium, FlavorCustom]
 	Name string
 	// Represents the number of CPUs
-	NumCPUs int32
+	NumCPUs int32 `json:"cpu"`
 	// Represents the size of main memory in MB
-	MemoryMB int64
+	MemoryMB int64 `json:"memory"`
 }
 
 var _ lvm.VirtualMachine = (*VM)(nil)
@@ -1421,9 +1421,14 @@ func GetClusterNetworkList(vm *VM, filter map[string][]string) ([]map[string]str
 	return networks, nil
 }
 
+type VmProperties struct {
+	Name       string
+	Properties mo.VirtualMachine
+}
+
 // getDcVMList : returns list of VirtualMachine objects in a Datacenter
 func getDcVMList(vm *VM, datacenter *object.Datacenter) (
-	map[string]mo.VirtualMachine, error) {
+	[]VmProperties, error) {
 	// Set datacenter
 	vm.finder.SetDatacenter(datacenter)
 	folders, err := datacenter.Folders(vm.ctx)
@@ -1438,11 +1443,8 @@ func getDcVMList(vm *VM, datacenter *object.Datacenter) (
 // getVmsInFolder: returns map of full path and mo.Virtualmachine struct of vms
 // in a vcenter vm folder
 func getVmsInFolder(vm *VM, folder *object.Folder, path string) (
-	map[string]mo.VirtualMachine, error) {
-	var (
-		allVms map[string]mo.VirtualMachine
-	)
-	allVms = make(map[string]mo.VirtualMachine)
+	[]VmProperties, error) {
+	allVms := make([]VmProperties, 0)
 	// get list of folders/vms/templates in folder
 	children, err := folder.Children(vm.ctx)
 	if err != nil {
@@ -1475,15 +1477,13 @@ func getVmsInFolder(vm *VM, folder *object.Folder, path string) (
 			folder := object.NewFolder(vm.client.Client,
 				mor)
 			// gettings vm in folder recursively
-			vms, err := getVmsInFolder(vm, folder,
+			vmProps, err := getVmsInFolder(vm, folder,
 				path+folderName+"/")
 			if err != nil {
 				return nil, err
 			}
 			// updating the allVMs hash
-			for name, vmMo := range vms {
-				allVms[name] = vmMo
-			}
+			allVms = append(allVms, vmProps...)
 		case "VirtualMachine":
 			// if child is vm/template, return the full path and
 			// mo of the vm
@@ -1505,7 +1505,9 @@ func getVmsInFolder(vm *VM, folder *object.Folder, path string) (
 			// Adding delimitter in case "/" is present in name
 			vmName = path + strings.Replace(vmName, "/", "\\/",
 				-1)
-			allVms[vmName] = vmMo
+			allVms = append(allVms, VmProperties{
+				Name:       vmName,
+				Properties: vmMo})
 		}
 	}
 	return allVms, nil
@@ -1711,9 +1713,12 @@ func getVmInfo(vmMo mo.VirtualMachine, vmPath string) map[string]interface{} {
 		}
 		backing := disk.Backing.(types.BaseVirtualDeviceFileBackingInfo)
 		fileBackingInfo := backing.GetVirtualDeviceFileBackingInfo()
+
+		diskSizeGB := disk.CapacityInKB / (1024 * 1024)
+
 		diskInfo = append(diskInfo, map[string]interface{}{
 			"name":      devinfo.Label,
-			"size":      disk.CapacityInKB,
+			"size":      diskSizeGB,
 			"disk_file": fileBackingInfo.FileName,
 		})
 	}
@@ -1723,23 +1728,24 @@ func getVmInfo(vmMo mo.VirtualMachine, vmPath string) map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"name":           vmPath, // full name/path of vm
-		"id":             vmMo.Self.Value,
-		"instance_uuid":  vmMo.Summary.Config.InstanceUuid,
-		"memory_size_mb": vmMo.Summary.Config.MemorySizeMB,
-		"num_cpu":        vmMo.Summary.Config.NumCpu,
-		"disks":          diskInfo,
-		"ip_addresses":   getIpFromVmMo(&vmMo),
-		"nic_info":       getNicInfo(vmMo),
-		"os_details":     getOsDetails(vmMo),
-		"tool_status":    toolsStatus,
+		"name":          vmPath, // full name/path of vm
+		"path":          vmPath, // TODO set full inventory path of vm/template
+		"id":            vmMo.Self.Value,
+		"instance_uuid": vmMo.Summary.Config.InstanceUuid,
+		"memory":        vmMo.Summary.Config.MemorySizeMB,
+		"cpu":           vmMo.Summary.Config.NumCpu,
+		"disks":         diskInfo,
+		"ip_addresses":  getIpFromVmMo(&vmMo),
+		"nic_info":      getNicInfo(vmMo),
+		"os_details":    getOsDetails(vmMo),
+		"tool_status":   toolsStatus,
 	}
 }
 
 // GetVmList : Returns the VMs/templates info in a dc/cluster/host
 func GetVmList(vm *VM, markedTemplate bool) ([]map[string]interface{}, error) {
 	var err error
-	vmMoList := make(map[string]mo.VirtualMachine)
+	vmPropList := make([]VmProperties, 0)
 	vmList := make([]map[string]interface{}, 0)
 	// set up session to vcenter server
 	if err := SetupSession(vm); err != nil {
@@ -1753,18 +1759,25 @@ func GetVmList(vm *VM, markedTemplate bool) ([]map[string]interface{}, error) {
 			if err != nil {
 				return nil, err
 			}
-			vmMoList[vmMo.Name] = *vmMo
+			vmPropList = append(vmPropList, VmProperties{
+				Name:       vmMo.Name,
+				Properties: *vmMo})
 		}
 	} else {
-		vmMoList, err = getVirtualMachines(vm)
+		if vm.Datacenter == "" {
+			vmPropList, err = getVirtualMachines(vm, true)
+		} else {
+			vmPropList, err = getVirtualMachines(vm, false)
+		}
 		if err != nil {
 			return nil, err
 		}
 	}
-	if vmMoList == nil {
+	if vmPropList == nil {
 		return vmList, nil
 	}
-	for name, vmo := range vmMoList {
+	for _, vmProp := range vmPropList {
+		vmo := vmProp.Properties
 		// Filter out the templates
 		if vmo.Config == nil {
 			continue
@@ -1775,20 +1788,37 @@ func GetVmList(vm *VM, markedTemplate bool) ([]map[string]interface{}, error) {
 			!markedTemplate && vmo.Config.Template {
 			continue
 		}
-		vminfo := getVmInfo(vmo, name)
+		vminfo := getVmInfo(vmo, vmProp.Name)
 		vmList = append(vmList, vminfo)
 	}
 	return vmList, nil
 }
 
-// getVirtualMachines : Returns the virtual machines in a dc/cluster/host
-func getVirtualMachines(vm *VM) (map[string]mo.VirtualMachine, error) {
+// getVirtualMachines : Returns the virtual machines in a allDCs/dc/cluster/host
+func getVirtualMachines(vm *VM, allDCs bool) ([]VmProperties, error) {
 	var (
 		hsMos []mo.HostSystem
 		hsMo  mo.HostSystem
 	)
-	vmsInDc := make(map[string]mo.VirtualMachine)
-	vmsInCluster := make(map[string]mo.VirtualMachine)
+	vmsInDc := make([]VmProperties, 0)
+	vmsInCluster := make([]VmProperties, 0)
+
+	if allDCs {
+		dcList, err := vm.finder.DatacenterList(vm.ctx, "*")
+		if err != nil {
+			return nil, fmt.Errorf("Error in getting datacenter "+
+				"list: %v", err)
+		}
+		allDCsVMs := make([]VmProperties, 0)
+		for _, dcObj := range dcList {
+			vmsInDc, err = getDcVMList(vm, dcObj)
+			if err != nil {
+				return nil, err
+			}
+			allDCsVMs = append(allDCsVMs, vmsInDc...)
+		}
+		return allDCsVMs, nil
+	}
 
 	// Return virtual machines for the whole datacenter
 	dcMo, err := GetDatacenter(vm)
@@ -1833,7 +1863,9 @@ func getVirtualMachines(vm *VM) (map[string]mo.VirtualMachine, error) {
 		}
 	}
 
-	for path, vmMo := range vmsInDc {
+	for _, vmProp := range vmsInDc {
+		vmMo := vmProp.Properties
+
 		if vmMo.Runtime.Host == nil {
 			continue
 		}
@@ -1843,7 +1875,9 @@ func getVirtualMachines(vm *VM) (map[string]mo.VirtualMachine, error) {
 			return nil, err
 		}
 		if _, ok := hostsLookup[hsMo.Name]; ok {
-			vmsInCluster[path] = vmMo
+			vmsInCluster = append(vmsInCluster, VmProperties{
+				Name:       vmProp.Name,
+				Properties: vmMo})
 		}
 	}
 	return vmsInCluster, nil
