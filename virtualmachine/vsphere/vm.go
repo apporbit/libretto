@@ -528,6 +528,11 @@ type Flavor struct {
 	MemoryMB int64 `json:"memory"`
 }
 
+type Template struct {
+	Name         string `json:"name"`
+	InstanceUuid string `json:"instance_uuid"`
+}
+
 var _ lvm.VirtualMachine = (*VM)(nil)
 
 // VM represents a vSphere VM.
@@ -560,7 +565,7 @@ type VM struct {
 	// InstanceUuids is the list of instance uuids for the VMs on vcenter server
 	InstanceUuids []string
 	// Template is the name to use for the VM's template
-	Template string
+	Template Template
 	// Datastores is a slice of permissible datastores. One is picked out of these.
 	Datastores []string
 	// UseLocalTemplates is a flag to indicate whether a template should be uploaded on all
@@ -617,14 +622,14 @@ func (vm *VM) Provision() (err error) {
 	}
 
 	var template string
-	template = vm.Template
+	template = vm.Template.Name
 	usableDatastores := []string{}
 	for _, d := range datastores {
 		if vm.UseLocalTemplates {
-			template = createTemplateName(vm.Template, d)
+			template = createTemplateName(vm.Template.Name, d)
 		}
 		// Does the VM template already exist?
-		e, err := Exists(vm, dcMo, template)
+		e, err := Exists(vm, dcMo, template, vm.Template.InstanceUuid)
 		if err != nil {
 			return fmt.Errorf("failed to check if the template already exists: %v", err)
 		}
@@ -637,7 +642,7 @@ func (vm *VM) Provision() (err error) {
 			switch *vm.SkipExisting {
 			case SKIPTEMPLATE_USE: //PASS
 			case SKIPTEMPLATE_ERROR:
-				return fmt.Errorf("Template already exists: %s", vm.Template)
+				return fmt.Errorf("Template already exists: %s", vm.Template.Name)
 			case SKIPTEMPLATE_OVERWRITE:
 				if err := DeleteTemplate(vm); err != nil {
 					return err
@@ -661,7 +666,7 @@ func (vm *VM) Provision() (err error) {
 	}
 
 	// Does the VM already exist?
-	e, err := Exists(vm, dcMo, vm.Name)
+	e, err := Exists(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return fmt.Errorf("failed to check if the vm already exists: %v", err)
 	}
@@ -697,7 +702,7 @@ func (vm *VM) AddDisk() error {
 	}
 
 	// Finds the vm with name vm.Name
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return fmt.Errorf("VM :%s not found. Error : %v",
 			vm.Name, err)
@@ -825,7 +830,7 @@ func (vm *VM) GetIPsAndIds() (VMInfo, error) {
 	if err != nil {
 		return vmInfo, err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return vmInfo, err
 	}
@@ -858,7 +863,7 @@ func (vm *VM) Destroy() (err error) {
 	if err != nil {
 		return err
 	}
-	exists, err := Exists(vm, dcMo, vm.Name)
+	exists, err := Exists(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -923,7 +928,7 @@ func (vm *VM) Destroy() (err error) {
 		}
 	}
 
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -1004,7 +1009,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 	if err != nil {
 		return vmInfo, err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return vmInfo, err
 	}
@@ -1059,7 +1064,7 @@ func (vm *VM) Suspend() (err error) {
 	if err != nil {
 		return err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -1170,7 +1175,7 @@ func DeleteTemplate(vm *VM) error {
 	}
 	// find and delete vm-templates from all provided datastores
 	if !vm.UseLocalTemplates {
-		vmMo, err := findVM(vm, dcMo, vm.Template)
+		vmMo, err := findVM(vm, dcMo, vm.Template.Name, vm.Template.InstanceUuid)
 		if err != nil {
 			return err
 		}
@@ -1179,9 +1184,9 @@ func DeleteTemplate(vm *VM) error {
 	}
 	for _, datastore := range vm.Datastores {
 		// generate template name <provided-name>-<datastore-name>
-		template := createTemplateName(vm.Template, datastore)
+		template := createTemplateName(vm.Template.Name, datastore)
 		// finds the template vm in Host specified in vm.Destination in Datacenter dcMo
-		templateVm, err := findVM(vm, dcMo, template)
+		templateVm, err := findVM(vm, dcMo, template, vm.Template.InstanceUuid)
 		if err != nil {
 			// add to missing templates list if it doesn't exist or in case of error
 			missingTemplates = append(missingTemplates, template)
@@ -1641,9 +1646,9 @@ func CreateTemplate(vm *VM) error {
 		return err
 	}
 
-	_, err = findVM(vm, dcMo, vm.Template)
+	_, err = findVM(vm, dcMo, vm.Template.Name, vm.Template.InstanceUuid)
 	if err == nil {
-		return fmt.Errorf("%s : Template already exists", vm.Template)
+		return fmt.Errorf("%s : Template already exists", vm.Template.Name)
 	}
 	//selects a datstore at random and uploads the template
 	vm.datastore = util.ChooseRandomString(vm.Datastores)
@@ -1779,7 +1784,7 @@ func ConvertToTemplate(vm *VM) error {
 		return err
 	}
 
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return fmt.Errorf("error getting the uploaded VM: %v", err)
 	}

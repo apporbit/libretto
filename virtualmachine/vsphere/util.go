@@ -67,8 +67,9 @@ func StringInSlice(str string, list []string) bool {
 var checkCustomSpecMutex sync.Mutex
 
 // Exists checks if the VM already exists.
-var Exists = func(vm *VM, dc *mo.Datacenter, tName string) (bool, error) {
-	_, err := findVM(vm, dc, tName)
+var Exists = func(vm *VM, dc *mo.Datacenter, tName string,
+	instanceUuid string) (bool, error) {
+	_, err := findVM(vm, dc, tName, instanceUuid)
 	if err != nil {
 		if _, ok := err.(ErrorObjectNotFound); ok {
 			return false, nil
@@ -391,9 +392,20 @@ var createRequest = func(r io.Reader, method string, insecure bool, length int64
 	return nil
 }
 
-// findVM finds the vm Managed Object referenced by the name or returns an error if it is not found.
-var findVM = func(vm *VM, dc *mo.Datacenter, name string) (*mo.VirtualMachine, error) {
-	moVM, err := searchTree(vm, &dc.VmFolder, name)
+// findVM finds the vm Managed Object referenced by the name/instanceUuid
+// or returns an error if it is not found.
+var findVM = func(vm *VM, dc *mo.Datacenter, name string,
+	instanceUuid string) (*mo.VirtualMachine, error) {
+	var (
+		moVM *mo.VirtualMachine
+		err  error
+	)
+
+	if instanceUuid != "" {
+		moVM, err = searchVmByUuid(vm, instanceUuid)
+	} else {
+		moVM, err = searchTree(vm, &dc.VmFolder, name)
+	}
 	if err != nil {
 		return moVM, err
 	}
@@ -544,7 +556,7 @@ func searchVmByUuid(vm *VM, instanceUuid string) (*mo.VirtualMachine, error) {
 			"Invalid object with uuid found"), instanceUuid)
 	}
 	err = vm.collector.RetrieveOne(vm.ctx, vmObj.Reference(), []string{
-		"name", "config", "runtime", "summary"}, &vmMo)
+		"name", "config", "runtime", "summary", "guest"}, &vmMo)
 	if err != nil {
 		return nil, err
 	}
@@ -808,11 +820,11 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	}
 	var template string
 	if vm.UseLocalTemplates {
-		template = createTemplateName(vm.Template, vm.datastore)
+		template = createTemplateName(vm.Template.Name, vm.datastore)
 	} else {
-		template = vm.Template
+		template = vm.Template.Name
 	}
-	vmMo, err := findVM(vm, dcMo, template)
+	vmMo, err := findVM(vm, dcMo, template, vm.Template.InstanceUuid)
 	if err != nil {
 		return fmt.Errorf("error retrieving template: %v", err)
 	}
@@ -937,7 +949,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	if tInfo.Error != nil {
 		return fmt.Errorf("clone task finished with error: %v", tInfo.Error)
 	}
-	vmMo, err = findVM(vm, dcMo, vm.Name)
+	vmMo, err = findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return fmt.Errorf("failed to retrieve cloned VM: %v", err)
 	}
@@ -1129,7 +1141,7 @@ var halt = func(vm *VM) error {
 	if err != nil {
 		return err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -1156,7 +1168,7 @@ var shutDown = func(vm *VM) error {
 	if err != nil {
 		return err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -1238,7 +1250,7 @@ var restart = func(vm *VM) error {
 	if err != nil {
 		return err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -1265,7 +1277,7 @@ var start = func(vm *VM) error {
 	if err != nil {
 		return err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -1299,7 +1311,7 @@ var reset = func(vm *VM) error {
 	if err != nil {
 		return err
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return err
 	}
@@ -1455,9 +1467,9 @@ var createTemplateName = func(t string, ds string) string {
 var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string) error {
 	var template string
 	if vm.UseLocalTemplates {
-		template = createTemplateName(vm.Template, selectedDatastore)
+		template = createTemplateName(vm.Template.Name, selectedDatastore)
 	} else {
-		template = vm.Template
+		template = vm.Template.Name
 	}
 	vm.datastore = selectedDatastore
 	downloadOvaPath, err := ioutil.TempDir("", "")
@@ -1527,7 +1539,7 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 		return fmt.Errorf("error uploading the ovf template: %v", err)
 	}
 
-	vmMo, err := findVM(vm, dcMo, template)
+	vmMo, err := findVM(vm, dcMo, template, vm.Template.InstanceUuid)
 	if err != nil {
 		return fmt.Errorf("error getting the uploaded VM: %v", err)
 	}
@@ -1637,7 +1649,7 @@ func getState(vm *VM) (state string, err error) {
 	if err != nil {
 		return "", lvm.ErrVMInfoFailed
 	}
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, dcMo, vm.Name, "")
 	if err != nil {
 		return "", lvm.ErrVMInfoFailed
 	}
