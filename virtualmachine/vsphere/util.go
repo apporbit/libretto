@@ -437,7 +437,6 @@ var findVM = func(vm *VM, searchFilter VMSearchFilter) (*mo.VirtualMachine,
 			return nil, err
 		}
 		moVM, err = searchTree(vm, &dc.VmFolder, searchFilter.Name)
-
 	}
 	if err != nil {
 		return moVM, err
@@ -446,6 +445,40 @@ var findVM = func(vm *VM, searchFilter VMSearchFilter) (*mo.VirtualMachine,
 	// manual resolution. Anytime we look up a VM try first to resolve any
 	// questions that we know how to answer.
 	return moVM, vm.answerQuestion(moVM)
+}
+
+// setCustomField: sets custom field and value for given vm/template
+func setCustomField(vm *VM, vmMo *mo.VirtualMachine, fieldName string,
+	fieldValue string) error {
+	fieldsManager, err := object.GetCustomFieldsManager(vm.client.Client)
+	if err != nil {
+		return err
+	}
+
+	key, err := fieldsManager.FindKey(vm.ctx, fieldName)
+	if err != nil {
+		if err.Error() == "key name not found" {
+			_, err := fieldsManager.Add(vm.ctx, fieldName, "VirtualMachine",
+				nil, nil)
+			if err != nil {
+				return err
+			}
+		} else {
+			return err
+		}
+	}
+
+	key, err = fieldsManager.FindKey(vm.ctx, fieldName)
+	if err != nil {
+		return err
+	}
+
+	err = fieldsManager.Set(vm.ctx, vmMo.Reference(), key, fieldValue)
+	if err != nil {
+		return err
+	}
+
+	return nil
 }
 
 // splitPathToList: splits path containing special character including delimiter
