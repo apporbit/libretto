@@ -707,7 +707,7 @@ func removeExistingNetworks(vm *VM, vmObj *object.VirtualMachine) ([]types.BaseV
 // Function to search disk in disks array with its name
 func findByVirtualDeviceFileName(disks []Disk, name string) *Disk {
 	for _, disk := range disks {
-		if disk.DiskName == name {
+		if disk.DiskFile == name {
 			return &disk
 		}
 	}
@@ -1037,14 +1037,14 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
 		}
 
 		// getting device list after adding disk and setting appropriate
-		// vmdk filename to DiskName
+		// vmdk filename to DiskFile
 		devices, err = vmObj.Device(vm.ctx)
 		if err != nil {
 			return fmt.Errorf("Failed to get devices after creating "+
 				"Disks[%d] {%v} : %v", index, disk, err)
 		}
 		vmdkFilename := diffDisks(devices, devListBefore)
-		vm.Disks[index].DiskName = vmdkFilename[0]
+		vm.Disks[index].DiskFile = vmdkFilename[0]
 	}
 
 	return nil
