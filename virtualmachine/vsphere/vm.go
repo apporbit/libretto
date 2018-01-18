@@ -434,7 +434,7 @@ type Disk struct {
 	Controller   string `json:"controller,omitempty"`
 	Provisioning string `json:"provisioning,omitempty"`
 	Datastore    string `json:"datastore,omitempty"`
-	DiskName     string `json:"disk_file,omitempty"`
+	DiskFile     string `json:"disk_file,omitempty"`
 }
 
 // Snapshot represents a vSphere snapshot to create
@@ -709,7 +709,7 @@ func (vm *VM) AddDisk() error {
 }
 
 // RemoveDisk: removes given list of disks attached to the virtualmachine 'vm'
-// disk.DiskName is the name of the vmdk file for the disk
+// disk.DiskFile is the name of the vmdk file for the disk
 func (vm *VM) RemoveDisk() error {
 	var errorMessage string
 	if err := SetupSession(vm); err != nil {
@@ -739,7 +739,7 @@ func (vm *VM) RemoveDisk() error {
 			switch device := d.(type) {
 			case *types.VirtualDisk:
 				fileName := d.GetVirtualDevice().Backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo().FileName
-				if fileName == disk.DiskName {
+				if fileName == disk.DiskFile {
 					deviceMo = device
 					break
 				}
@@ -747,14 +747,14 @@ func (vm *VM) RemoveDisk() error {
 		}
 
 		if deviceMo == nil {
-			errorMessage += fmt.Sprintf("%s : No disk with name\n", disk.DiskName)
+			errorMessage += fmt.Sprintf("%s : No disk with name\n", disk.DiskFile)
 			continue
 		}
 
 		// Creates the virtualmachine object to remove the disk
 		vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 		if err = vmo.RemoveDevice(vm.ctx, false, deviceMo); err != nil {
-			errorMessage += fmt.Errorf("%s : Delete disk task returned an error : %s \n", disk.DiskName, err).Error()
+			errorMessage += fmt.Errorf("%s : Delete disk task returned an error : %s \n", disk.DiskFile, err).Error()
 		}
 	}
 	if errorMessage != "" {
@@ -970,7 +970,7 @@ func getDisksInfo(vmMo mo.VirtualMachine) []Disk {
 				diskInfo.Controller = controller
 				backing := disk.Backing
 				fileBackingInfo := backing.(types.BaseVirtualDeviceFileBackingInfo).GetVirtualDeviceFileBackingInfo()
-				diskInfo.DiskName = fileBackingInfo.FileName
+				diskInfo.DiskFile = fileBackingInfo.FileName
 				if *(backing.(*types.VirtualDiskFlatVer2BackingInfo)).ThinProvisioned {
 					diskInfo.Provisioning = "thin"
 				} else {
@@ -1440,8 +1440,8 @@ func getDcVMList(vm *VM, datacenter *object.Datacenter) (
 	return getVmsInFolder(vm, folders.VmFolder, "")
 }
 
-// getVmsInFolder: returns map of full path and mo.Virtualmachine struct of vms
-// in a vcenter vm folder
+// getVmsInFolder: returns list of VmProperties which has full path and
+// mo.Virtualmachine struct of vms in a vcenter vm folder
 func getVmsInFolder(vm *VM, folder *object.Folder, path string) (
 	[]VmProperties, error) {
 	allVms := make([]VmProperties, 0)
