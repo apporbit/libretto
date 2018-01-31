@@ -1078,7 +1078,7 @@ var reconfigureVM = func(vm *VM, vmMo *mo.VirtualMachine) error {
 
 		vDisk = CreateDisk(devices, controller, dsMo.Reference(), "",
 			thinProvisioned)
-		vDisk.CapacityInKB = disk.Size
+		vDisk.CapacityInKB = int64(disk.Size)
 		if err := vmObj.AddDevice(vm.ctx, vDisk); err != nil {
 			return fmt.Errorf("Failed to add device while creating "+
 				"Disks[%d] {%v} : %v", index, disk, err)
@@ -1834,4 +1834,204 @@ func checkAndCreateCustomSpec(vm *VM) error {
 		}
 	}
 	return nil
+}
+
+type VmProperties struct {
+	Name       string
+	Properties mo.VirtualMachine
+}
+
+// getVMsInAllDCs: Returns virtual machines from all DCs (entire inventory)
+func getVMsInAllDCs(vm *VM) ([]VmProperties, error) {
+	dcList, err := vm.finder.DatacenterList(vm.ctx, "*")
+	if err != nil {
+		return nil, fmt.Errorf("Error in getting datacenter "+
+			"list: %v", err)
+	}
+	allDCsVMs := make([]VmProperties, 0)
+	vmsInDc := make([]VmProperties, 0)
+	for _, dcObj := range dcList {
+		vmsInDc, err = getDcVMList(vm, dcObj)
+		if err != nil {
+			return nil, err
+		}
+		allDCsVMs = append(allDCsVMs, vmsInDc...)
+	}
+	return allDCsVMs, nil
+}
+
+// getHostsLookup: returns appropriate hostsLookup map for given destination
+// cluster/host
+func getHostsLookup(vm *VM) (map[string]bool, error) {
+	hostsLookup := make(map[string]bool)
+	// if host is provided update the hostsLookup map to have one host only
+	if vm.Destination.HostSystem != "" {
+		hostsLookup = map[string]bool{
+			vm.Destination.HostSystem: false,
+		}
+	} else {
+		var hsMos []mo.HostSystem
+		// Get the cluster resource and its host
+		dcMo, err := GetDatacenter(vm)
+		if err != nil {
+			return nil, err
+		}
+		crMo, err := findClusterComputeResource(vm, dcMo,
+			vm.Destination.DestinationName)
+		if err != nil {
+			return nil, err
+		}
+		// get the hosts in cluster
+		err = vm.collector.Retrieve(vm.ctx, crMo.Host, []string{"name"},
+			&hsMos)
+		if err != nil {
+			return nil, err
+		}
+		for _, host := range hsMos {
+			hostsLookup[host.Name] = false
+		}
+	}
+	return hostsLookup, nil
+}
+
+// getVirtualMachines : Returns the virtual machines in a allDCs/dc/cluster/host
+func getVirtualMachines(vm *VM, allDCs bool) ([]VmProperties, error) {
+	var (
+		hsMo mo.HostSystem
+	)
+
+	if allDCs {
+		return getVMsInAllDCs(vm)
+	}
+
+	// get virtual machines for the whole datacenter
+	vmsInDc := make([]VmProperties, 0)
+	dcMo, err := GetDatacenter(vm)
+	if err != nil {
+		return nil, err
+	}
+	dcObj := object.NewDatacenter(vm.client.Client,
+		dcMo.Reference())
+	vmsInDc, err = getDcVMList(vm, dcObj)
+	if err != nil {
+		return nil, err
+	}
+
+	// if cluster name not given, return vms in datacenter
+	if vm.Destination.DestinationName == "" {
+		return vmsInDc, nil
+	}
+
+	// using hostsLookup to check if a vm is related to a host in map
+	vmsInCluster := make([]VmProperties, 0)
+	hostsLookup, err := getHostsLookup(vm)
+	if err != nil {
+		return nil, err
+	}
+
+	for _, vmProp := range vmsInDc {
+		vmMo := vmProp.Properties
+
+		if vmMo.Runtime.Host == nil {
+			continue
+		}
+		err = vm.collector.RetrieveOne(vm.ctx, *vmMo.Runtime.Host,
+			[]string{"name"}, &hsMo)
+		if err != nil {
+			return nil, err
+		}
+		if _, ok := hostsLookup[hsMo.Name]; ok {
+			vmsInCluster = append(vmsInCluster, VmProperties{
+				Name:       vmProp.Name,
+				Properties: vmMo})
+		}
+	}
+	return vmsInCluster, nil
+}
+
+// getDcVMList : returns list of VirtualMachine objects in a Datacenter
+func getDcVMList(vm *VM, datacenter *object.Datacenter) (
+	[]VmProperties, error) {
+	// Set datacenter
+	vm.finder.SetDatacenter(datacenter)
+	folders, err := datacenter.Folders(vm.ctx)
+	if err != nil {
+		return nil, err
+	}
+	// datacenter's vmFolder has all the vms in all the clusters/hosts in
+	// that datacetner, returning the vm in datacenter vmfolder
+	return getVmsInFolder(vm, folders.VmFolder, "")
+}
+
+// getVmsInFolder: returns list of VmProperties which has full path and
+// mo.Virtualmachine struct of vms in a vcenter vm folder
+func getVmsInFolder(vm *VM, folder *object.Folder, path string) (
+	[]VmProperties, error) {
+	allVms := make([]VmProperties, 0)
+	// get list of folders/vms/templates in folder
+	children, err := folder.Children(vm.ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, entity := range children {
+		mor := entity.Reference()
+		switch mor.Type {
+		// if child is a folder, look for vms in the folder recursively
+		// and add to the hash
+		case "Folder":
+			// Fetch the childEntity property of the folder
+			folderMo := mo.Folder{}
+			err := vm.collector.RetrieveOne(vm.ctx, mor, []string{
+				"name"}, &folderMo)
+			if err != nil {
+				if isObjectDeleted(err) {
+					continue
+				}
+				return nil, err
+			}
+			// unescaping to convert any escaped character
+			folderName, err := url.QueryUnescape(folderMo.Name)
+			if err != nil {
+				return nil, err
+			}
+			// Adding delimitter in case "/" is present in name
+			folderName = strings.Replace(folderName, "/", "\\/",
+				-1)
+			folder := object.NewFolder(vm.client.Client,
+				mor)
+			// gettings vm in folder recursively
+			vmProps, err := getVmsInFolder(vm, folder,
+				path+folderName+"/")
+			if err != nil {
+				return nil, err
+			}
+			// updating the allVMs hash
+			allVms = append(allVms, vmProps...)
+		case "VirtualMachine":
+			// if child is vm/template, return the full path and
+			// mo of the vm
+			vmMo := mo.VirtualMachine{}
+			err := vm.collector.RetrieveOne(vm.ctx, mor, []string{
+				"name", "guest", "config", "runtime",
+				"summary"}, &vmMo)
+			if err != nil {
+				if isObjectDeleted(err) {
+					continue
+				}
+				return nil, err
+			}
+			// unescaping to convert any escaped character
+			vmName, err := url.QueryUnescape(vmMo.Name)
+			if err != nil {
+				return nil, err
+			}
+			// Adding delimitter in case "/" is present in name
+			vmName = path + strings.Replace(vmName, "/", "\\/",
+				-1)
+			allVms = append(allVms, VmProperties{
+				Name:       vmName,
+				Properties: vmMo})
+		}
+	}
+	return allVms, nil
 }
