@@ -533,6 +533,13 @@ type Template struct {
 	InstanceUuid string `json:"instance_uuid"`
 }
 
+// VMSearchFilter struct encapsulates all relevant search parameters
+type VMSearchFilter struct {
+	Name         string
+	InstanceUuid string
+	SearchInDC   bool
+}
+
 var _ lvm.VirtualMachine = (*VM)(nil)
 
 // VM represents a vSphere VM.
@@ -627,9 +634,10 @@ func (vm *VM) Provision() (err error) {
 	for _, d := range datastores {
 		if vm.UseLocalTemplates {
 			template = createTemplateName(vm.Template.Name, d)
+			vm.Template.Name = template
 		}
 		// Does the VM template already exist?
-		e, err := Exists(vm, dcMo, template, vm.Template.InstanceUuid)
+		e, err := Exists(vm, getTempSearchFilter(vm.Template))
 		if err != nil {
 			return fmt.Errorf("failed to check if the template already exists: %v", err)
 		}
@@ -666,7 +674,7 @@ func (vm *VM) Provision() (err error) {
 	}
 
 	// Does the VM already exist?
-	e, err := Exists(vm, dcMo, vm.Name, "")
+	e, err := Exists(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return fmt.Errorf("failed to check if the vm already exists: %v", err)
 	}
@@ -695,14 +703,8 @@ func (vm *VM) AddDisk() error {
 	// Cancel the sdk context
 	defer vm.cancel()
 
-	// Get a reference to the datacenter with host and vm folders populated
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return fmt.Errorf("Failed to retrieve datacenter: %v", err)
-	}
-
 	// Finds the vm with name vm.Name
-	vmMo, err := findVM(vm, dcMo, vm.Name, "")
+	vmMo, err := findVM(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return fmt.Errorf("VM :%s not found. Error : %v",
 			vm.Name, err)
@@ -731,18 +733,13 @@ func (vm *VM) RemoveDisk() error {
 	// Cancel the sdk context
 	defer vm.cancel()
 
-	// Get a reference to the datacenter with host and vm folders populated
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return fmt.Errorf("Failed to retrieve datacenter: %v", err)
-	}
-
 	// finds the virtualmachine with name vm.Name
-	vmMo, err := findVM(vm, dcMo, vm.Name)
+	vmMo, err := findVM(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return fmt.Errorf("VM :%s not found. Error : %v",
 			vm.Name, err)
 	}
+
 	for _, disk := range vm.Disks {
 		// find the virtual disk to be removed from the vm
 		var deviceMo *types.VirtualDisk
@@ -825,12 +822,7 @@ func (vm *VM) GetIPsAndIds() (VMInfo, error) {
 	}
 	defer vm.cancel()
 
-	// Get a reference to the datacenter with host and vm folders populated
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return vmInfo, err
-	}
-	vmMo, err := findVM(vm, dcMo, vm.Name, "")
+	vmMo, err := findVM(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return vmInfo, err
 	}
@@ -858,12 +850,7 @@ func (vm *VM) Destroy() (err error) {
 	}
 	defer vm.cancel()
 
-	// Get a reference to the datacenter with host and vm folders populated
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return err
-	}
-	exists, err := Exists(vm, dcMo, vm.Name, "")
+	exists, err := Exists(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return err
 	}
@@ -928,7 +915,7 @@ func (vm *VM) Destroy() (err error) {
 		}
 	}
 
-	vmMo, err := findVM(vm, dcMo, vm.Name, "")
+	vmMo, err := findVM(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return err
 	}
@@ -1004,12 +991,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 	}
 	defer vm.cancel()
 
-	// Get a reference to the datacenter with host and vm folders populated
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return vmInfo, err
-	}
-	vmMo, err := findVM(vm, dcMo, vm.Name, "")
+	vmMo, err := findVM(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return vmInfo, err
 	}
@@ -1059,12 +1041,7 @@ func (vm *VM) Suspend() (err error) {
 	}
 	defer vm.cancel()
 
-	// Get a reference to the datacenter with host and vm folders populated
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return err
-	}
-	vmMo, err := findVM(vm, dcMo, vm.Name, "")
+	vmMo, err := findVM(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return err
 	}
@@ -1169,13 +1146,10 @@ func DeleteTemplate(vm *VM) error {
 	if err := SetupSession(vm); err != nil {
 		return err
 	}
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return fmt.Errorf("Failed to retrieve datacenter: %v", err)
-	}
+
 	// find and delete vm-templates from all provided datastores
 	if !vm.UseLocalTemplates {
-		vmMo, err := findVM(vm, dcMo, vm.Template.Name, vm.Template.InstanceUuid)
+		vmMo, err := findVM(vm, getTempSearchFilter(vm.Template))
 		if err != nil {
 			return err
 		}
@@ -1184,12 +1158,13 @@ func DeleteTemplate(vm *VM) error {
 	}
 	for _, datastore := range vm.Datastores {
 		// generate template name <provided-name>-<datastore-name>
-		template := createTemplateName(vm.Template.Name, datastore)
+		templateCopy := vm.Template
+		templateCopy.Name = createTemplateName(vm.Template.Name, datastore)
 		// finds the template vm in Host specified in vm.Destination in Datacenter dcMo
-		templateVm, err := findVM(vm, dcMo, template, vm.Template.InstanceUuid)
+		templateVm, err := findVM(vm, getTempSearchFilter(templateCopy))
 		if err != nil {
 			// add to missing templates list if it doesn't exist or in case of error
-			missingTemplates = append(missingTemplates, template)
+			missingTemplates = append(missingTemplates, templateCopy.Name)
 			continue
 		}
 		err = deleteVM(vm, templateVm)
@@ -1646,7 +1621,9 @@ func CreateTemplate(vm *VM) error {
 		return err
 	}
 
-	_, err = findVM(vm, dcMo, vm.Template.Name, vm.Template.InstanceUuid)
+	searchFilter := getTempSearchFilter(vm.Template)
+	searchFilter.SearchInDC = true
+	_, err = findVM(vm, searchFilter)
 	if err == nil {
 		return fmt.Errorf("%s : Template already exists", vm.Template.Name)
 	}
@@ -1730,8 +1707,12 @@ func GetVmList(vm *VM, markedTemplate bool) ([]map[string]interface{}, error) {
 	defer vm.cancel()
 
 	if len(vm.InstanceUuids) != 0 {
+		searchFilter := VMSearchFilter{
+			SearchInDC: true,
+		}
 		for _, instanceUuid := range vm.InstanceUuids {
-			vmMo, err := searchVmByUuid(vm, instanceUuid)
+			searchFilter.InstanceUuid = instanceUuid
+			vmMo, err := searchVmByUuid(vm, searchFilter)
 			if err != nil {
 				return nil, err
 			}
@@ -1779,12 +1760,7 @@ func ConvertToTemplate(vm *VM) error {
 	}
 	defer vm.cancel()
 
-	dcMo, err := GetDatacenter(vm)
-	if err != nil {
-		return err
-	}
-
-	vmMo, err := findVM(vm, dcMo, vm.Name, "")
+	vmMo, err := findVM(vm, getVMSearchFilter(vm))
 	if err != nil {
 		return fmt.Errorf("error getting the uploaded VM: %v", err)
 	}
