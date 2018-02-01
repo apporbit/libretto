@@ -533,13 +533,6 @@ type Template struct {
 	InstanceUuid string `json:"instance_uuid"`
 }
 
-// VMSearchFilter struct encapsulates all relevant search parameters
-type VMSearchFilter struct {
-	Name         string
-	InstanceUuid string
-	SearchInDC   bool
-}
-
 var _ lvm.VirtualMachine = (*VM)(nil)
 
 // VM represents a vSphere VM.
@@ -674,7 +667,7 @@ func (vm *VM) Provision() (err error) {
 	}
 
 	// Does the VM already exist?
-	e, err := Exists(vm, getVMSearchFilter(vm))
+	e, err := Exists(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return fmt.Errorf("failed to check if the vm already exists: %v", err)
 	}
@@ -704,7 +697,7 @@ func (vm *VM) AddDisk() error {
 	defer vm.cancel()
 
 	// Finds the vm with name vm.Name
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return fmt.Errorf("VM :%s not found. Error : %v",
 			vm.Name, err)
@@ -734,7 +727,7 @@ func (vm *VM) RemoveDisk() error {
 	defer vm.cancel()
 
 	// finds the virtualmachine with name vm.Name
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return fmt.Errorf("VM :%s not found. Error : %v",
 			vm.Name, err)
@@ -822,7 +815,7 @@ func (vm *VM) GetIPsAndIds() (VMInfo, error) {
 	}
 	defer vm.cancel()
 
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return vmInfo, err
 	}
@@ -850,7 +843,7 @@ func (vm *VM) Destroy() (err error) {
 	}
 	defer vm.cancel()
 
-	exists, err := Exists(vm, getVMSearchFilter(vm))
+	exists, err := Exists(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -915,7 +908,7 @@ func (vm *VM) Destroy() (err error) {
 		}
 	}
 
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -991,7 +984,7 @@ func (vm *VM) GetVMInfo() (VMInfo, error) {
 	}
 	defer vm.cancel()
 
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return vmInfo, err
 	}
@@ -1041,7 +1034,7 @@ func (vm *VM) Suspend() (err error) {
 	}
 	defer vm.cancel()
 
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -1760,7 +1753,7 @@ func ConvertToTemplate(vm *VM) error {
 	}
 	defer vm.cancel()
 
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return fmt.Errorf("error getting the uploaded VM: %v", err)
 	}

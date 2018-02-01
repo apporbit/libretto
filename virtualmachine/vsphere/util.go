@@ -63,11 +63,18 @@ func StringInSlice(str string, list []string) bool {
 	return false
 }
 
+// VMSearchFilter struct encapsulates all relevant search parameters
+type VMSearchFilter struct {
+	Name         string
+	InstanceUuid string
+	SearchInDC   bool
+}
+
 // getVMSearchFilter: returns VMSearchFilter object for given vm
 // by default vm is searched within DC
-func getVMSearchFilter(vm *VM) VMSearchFilter {
+func getVMSearchFilter(vmName string) VMSearchFilter {
 	searchFilter := VMSearchFilter{
-		Name:       vm.Name,
+		Name:       vmName,
 		SearchInDC: true,
 	}
 	return searchFilter
@@ -574,18 +581,18 @@ func searchVmByUuid(vm *VM, searchFilter VMSearchFilter) (
 	isInstanceUuid := new(bool)
 	*isInstanceUuid = true
 
+	dcObj = nil
+
 	if searchFilter.SearchInDC {
 		dcMo, err = GetDatacenter(vm)
 		if err != nil {
 			return nil, err
 		}
 		dcObj = object.NewDatacenter(vm.client.Client, dcMo.Self)
-		obj, err = s.FindByUuid(vm.ctx, dcObj, searchFilter.InstanceUuid, true,
-			isInstanceUuid)
-	} else {
-		obj, err = s.FindByUuid(vm.ctx, nil, searchFilter.InstanceUuid, true,
-			isInstanceUuid)
 	}
+
+	obj, err = s.FindByUuid(vm.ctx, dcObj, searchFilter.InstanceUuid, true,
+		isInstanceUuid)
 	if err != nil {
 		return nil, err
 	}
@@ -858,10 +865,8 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		}
 		dsMor = dsMo.Reference()
 	}
-	var template string
 	if vm.UseLocalTemplates {
-		template = createTemplateName(vm.Template.Name, vm.datastore)
-		vm.Template.Name = template
+		vm.Template.Name = createTemplateName(vm.Template.Name, vm.datastore)
 	}
 	vmMo, err := findVM(vm, getTempSearchFilter(vm.Template))
 	if err != nil {
@@ -988,7 +993,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	if tInfo.Error != nil {
 		return fmt.Errorf("clone task finished with error: %v", tInfo.Error)
 	}
-	vmMo, err = findVM(vm, getVMSearchFilter(vm))
+	vmMo, err = findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return fmt.Errorf("failed to retrieve cloned VM: %v", err)
 	}
@@ -1176,7 +1181,7 @@ var halt = func(vm *VM) error {
 			return err
 		}
 	}
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -1198,7 +1203,7 @@ var halt = func(vm *VM) error {
 
 // shutDown Initiates guest shut down of this VM.
 var shutDown = func(vm *VM) error {
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -1275,7 +1280,7 @@ func waitForGuestStatus(vm *VM, vmMo *mo.VirtualMachine, status int,
 
 // restart Initiates guest reboot of this VM.
 var restart = func(vm *VM) error {
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -1297,7 +1302,7 @@ var restart = func(vm *VM) error {
 }
 
 var start = func(vm *VM) error {
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -1326,7 +1331,7 @@ var start = func(vm *VM) error {
 }
 
 var reset = func(vm *VM) error {
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return err
 	}
@@ -1660,7 +1665,7 @@ func validateHost(vm *VM, hsMor types.ManagedObjectReference) (bool, error) {
 
 func getState(vm *VM) (state string, err error) {
 	// Get a reference to the datacenter with host and vm folders populated
-	vmMo, err := findVM(vm, getVMSearchFilter(vm))
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
 	if err != nil {
 		return "", lvm.ErrVMInfoFailed
 	}
