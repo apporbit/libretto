@@ -25,7 +25,7 @@ const Linux = `{
     },
     "nic": {
       "type": "string"
-    },    
+    },
     "os_file": {
       "type": "string"
     },
@@ -144,7 +144,7 @@ const Linux = `{
           "computerName": "[parameters('vm_name')]",
           "adminUsername": "[parameters('username')]",
           "linuxConfiguration": {
-            "disablePasswordAuthentication": "true",
+            "disablePasswordAuthentication": true,
             "ssh": {
               "publicKeys": [
                 {
@@ -181,7 +181,7 @@ const Linux = `{
         },
         "diagnosticsProfile": {
           "bootDiagnostics": {
-             "enabled": "false"
+             "enabled": false
           }
         }
       }

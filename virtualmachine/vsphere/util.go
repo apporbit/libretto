@@ -24,6 +24,7 @@ import (
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
 	"github.com/vmware/govmomi/object"
+	"github.com/vmware/govmomi/ovf"
 	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25"
 	"github.com/vmware/govmomi/vim25/mo"
@@ -1484,7 +1485,7 @@ var uploadTemplate = func(vm *VM, dcMo *mo.Datacenter, selectedDatastore string)
 		PropertyMapping:  nil,
 	}
 
-	ovfManager := object.NewOvfManager(vm.client.Client)
+	ovfManager := ovf.NewManager(vm.client.Client)
 	rpo := object.NewResourcePool(vm.client.Client, l.ResourcePool)
 
 	specResult, err := ovfManager.CreateImportSpec(vm.ctx, ovfContent, rpo,

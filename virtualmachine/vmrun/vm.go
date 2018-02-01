@@ -324,7 +324,11 @@ func (vm *VM) Provision() error {
 		return err
 	}
 
-	runVMware()
+	_, _, err = runVMware()
+	if err != nil {
+		return err
+	}
+
 	return vm.waitUntilReady()
 }
 

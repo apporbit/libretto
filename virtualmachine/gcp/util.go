@@ -3,6 +3,7 @@
 package gcp
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -12,14 +13,13 @@ import (
 	"os"
 	"strings"
 	"time"
-	"context"
 
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/jwt"
 
-	googlecloud "google.golang.org/api/compute/v1"
 	googleresourcemanager "google.golang.org/api/cloudresourcemanager/v1"
+	googlecloud "google.golang.org/api/compute/v1"
 )
 
 var (
@@ -102,7 +102,7 @@ func (vm *VM) getService() (*googleService, error) {
 			Scopes:     vm.Scopes,
 			TokenURL:   tokenURL,
 		}
-		client = config.Client(oauth2.NoContext)
+		client = config.Client(context.Background())
 	} else {
 		client = &http.Client{
 			Timeout: time.Duration(30 * time.Second),
@@ -724,7 +724,7 @@ func (svc *googleService) removeFirewallRules() error {
 				newRules[indexEndp].Ports[indPort] = ""
 				newRules[indexEndp].Ports = append(
 					newRules[indexEndp].Ports[:indPort],
-					newRules[indexEndp].Ports[indPort+1:]...
+					newRules[indexEndp].Ports[indPort+1:]...,
 				)
 				// Set the index back by one because we have
 				// shifted elements from indP onwards to left

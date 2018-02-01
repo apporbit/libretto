@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/pyr/egoscale/src/egoscale"
+	"github.com/pyr/egoscale"
 )
 
 func (vm *VM) getExoClient() *egoscale.Client {

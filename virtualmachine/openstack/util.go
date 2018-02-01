@@ -14,12 +14,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/rackspace/gophercloud"
-	"github.com/rackspace/gophercloud/openstack"
-	"github.com/rackspace/gophercloud/openstack/blockstorage/v1/volumes"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/extensions/volumeattach"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/images"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/servers"
+	"github.com/gophercloud/gophercloud"
+	"github.com/gophercloud/gophercloud/openstack"
+	"github.com/gophercloud/gophercloud/openstack/blockstorage/v1/volumes"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/volumeattach"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/images"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
 
 	"github.com/apcera/libretto/ssh"
 	lvm "github.com/apcera/libretto/virtualmachine"
@@ -505,32 +505,11 @@ func deattachAndDeleteVolume(vm *VM) error {
 	return nil
 }
 
-// Delete the instance
-func deleteVM(client *gophercloud.ServiceClient, vm *VM) error {
-	err := servers.Delete(client, vm.InstanceID).ExtractErr()
+// deleteVM deletes the instance.
+func deleteVM(client *gophercloud.ServiceClient, vmID string) error {
+	err := servers.Delete(client, vmID).ExtractErr()
 	if err != nil {
-		return fmt.Errorf("failed to destroy the vm: %s", err)
-	}
-
-	// Wait until its status becomes nil within ActionTimeout seconds.
-	var server *servers.Server
-	for i := 0; i < ActionTimeout; i++ {
-		server, err = getServer(vm)
-		if err != nil {
-			return err
-		}
-
-		if server == nil {
-			break
-		} else if server.Status == StateError {
-			return fmt.Errorf("error on destroying the vm")
-		}
-
-		time.Sleep(1 * time.Second)
-	}
-
-	if server != nil {
-		return ErrActionTimeout
+		return fmt.Errorf("failed to destroy vm %s: %s", vmID, err)
 	}
 	return nil
 }

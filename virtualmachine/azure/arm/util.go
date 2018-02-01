@@ -16,17 +16,19 @@ import (
 	"github.com/Azure/azure-sdk-for-go/arm/network"
 	"github.com/Azure/azure-sdk-for-go/arm/resources/resources"
 	"github.com/Azure/azure-sdk-for-go/storage"
+	"github.com/Azure/go-autorest/autorest"
+	"github.com/Azure/go-autorest/autorest/adal"
 	"github.com/Azure/go-autorest/autorest/azure"
 )
 
 // getServicePrincipalToken retrieves a new ServicePrincipalToken using values of the
 // passed credentials map.
-func getServicePrincipalToken(creds *OAuthCredentials, scope string) (*azure.ServicePrincipalToken, error) {
-	oauthConfig, err := azure.PublicCloud.OAuthConfigForTenant(creds.TenantID)
+func getServicePrincipalToken(creds *OAuthCredentials, scope string) (*adal.ServicePrincipalToken, error) {
+	oauthConfig, err := adal.NewOAuthConfig(azure.PublicCloud.ActiveDirectoryEndpoint, creds.TenantID)
 	if err != nil {
 		return nil, err
 	}
-	return azure.NewServicePrincipalToken(*oauthConfig, creds.ClientID, creds.ClientSecret, scope)
+	return adal.NewServicePrincipalToken(*oauthConfig, creds.ClientID, creds.ClientSecret, scope)
 }
 
 type armParameter struct {
@@ -146,8 +148,8 @@ func validateVM(vm *VM) error {
 // deploy deploys the given VM based on the default Linux arm template over the
 // VM's resource group.
 func (vm *VM) deploy() error {
-	// Set up the authorizer
-	authorizer, err := getServicePrincipalToken(&vm.Creds, azure.PublicCloud.ResourceManagerEndpoint)
+	// Get the auth token.
+	tok, err := getServicePrincipalToken(&vm.Creds, azure.PublicCloud.ResourceManagerEndpoint)
 	if err != nil {
 		return err
 	}
@@ -161,10 +163,10 @@ func (vm *VM) deploy() error {
 
 	// Create and send the deployment to the resource group
 	deploymentsClient := resources.NewDeploymentsClient(vm.Creds.SubscriptionID)
-	deploymentsClient.Authorizer = authorizer
+	deploymentsClient.Authorizer = autorest.NewBearerAuthorizer(tok)
 
-	_, err = deploymentsClient.CreateOrUpdate(vm.ResourceGroup, vm.DeploymentName, *deployment, nil)
-	if err != nil {
+	_, errc := deploymentsClient.CreateOrUpdate(vm.ResourceGroup, vm.DeploymentName, *deployment, nil)
+	if err := <-errc; err != nil {
 		return err
 	}
 
@@ -187,7 +189,7 @@ func (vm *VM) deploy() error {
 }
 
 // getPublicIP returns the public IP of the given VM, if exists one.
-func (vm *VM) getPublicIP(authorizer *azure.ServicePrincipalToken) (net.IP, error) {
+func (vm *VM) getPublicIP(authorizer autorest.Authorizer) (net.IP, error) {
 	publicIPAddressesClient := network.NewPublicIPAddressesClient(vm.Creds.SubscriptionID)
 	publicIPAddressesClient.Authorizer = authorizer
 
@@ -196,92 +198,109 @@ func (vm *VM) getPublicIP(authorizer *azure.ServicePrincipalToken) (net.IP, erro
 		return nil, err
 	}
 
-	if resPublicIP.Properties == nil || resPublicIP.Properties.IPAddress == nil ||
-		*resPublicIP.Properties.IPAddress == "" {
+	if resPublicIP.PublicIPAddressPropertiesFormat == nil || resPublicIP.PublicIPAddressPropertiesFormat.IPAddress == nil ||
+		*resPublicIP.PublicIPAddressPropertiesFormat.IPAddress == "" {
 		return nil, fmt.Errorf("VM has no public IP address")
 	}
-	return net.ParseIP(*resPublicIP.Properties.IPAddress), nil
+	return net.ParseIP(*resPublicIP.PublicIPAddressPropertiesFormat.IPAddress), nil
 }
 
 // getPrivateIP returns the private IP of the given VM, if exists one.
-func (vm *VM) getPrivateIP(authorizer *azure.ServicePrincipalToken) (net.IP, error) {
+func (vm *VM) getPrivateIP(authorizer autorest.Authorizer) (net.IP, error) {
 	interfaceClient := network.NewInterfacesClient(vm.Creds.SubscriptionID)
 	interfaceClient.Authorizer = authorizer
 
-	resPrivateIP, err := interfaceClient.Get(vm.ResourceGroup, vm.Nic, "")
+	iface, err := interfaceClient.Get(vm.ResourceGroup, vm.Nic, "")
 	if err != nil {
 		return nil, err
 	}
 
-	if resPrivateIP.Properties == nil || resPrivateIP.Properties.IPConfigurations == nil ||
-		len(*resPrivateIP.Properties.IPConfigurations) == 0 {
+	if iface.InterfacePropertiesFormat == nil || iface.InterfacePropertiesFormat.IPConfigurations == nil ||
+		len(*iface.InterfacePropertiesFormat.IPConfigurations) == 0 {
 		return nil, fmt.Errorf("VM has no private IP address")
 	}
-	ipConfigs := *resPrivateIP.Properties.IPConfigurations
+	ipConfigs := *iface.InterfacePropertiesFormat.IPConfigurations
 	if len(ipConfigs) > 1 {
 		return nil, fmt.Errorf("VM has multiple private IP addresses")
 	}
-	return net.ParseIP(*ipConfigs[0].Properties.PrivateIPAddress), nil
+	return net.ParseIP(*ipConfigs[0].InterfaceIPConfigurationPropertiesFormat.PrivateIPAddress), nil
 }
 
 // deleteOSFile deletes the OS file from the VM's storage account, returns an error if the operation
 // does not succeed.
-func (vm *VM) deleteVMFiles(authorizer *azure.ServicePrincipalToken) error {
+func (vm *VM) deleteVMFiles(authorizer autorest.Authorizer) error {
 	storageAccountsClient := armStorage.NewAccountsClient(vm.Creds.SubscriptionID)
 	storageAccountsClient.Authorizer = authorizer
 
-	accountKeys, err := storageAccountsClient.ListKeys(vm.ResourceGroup, vm.StorageAccount)
+	result, err := storageAccountsClient.ListKeys(vm.ResourceGroup, vm.StorageAccount)
 	if err != nil {
 		return err
 	}
 
-	storageClient, err := storage.NewBasicClient(vm.StorageAccount, *accountKeys.Key1)
+	accountKeys := result.Keys
+	if accountKeys == nil || len(*accountKeys) == 0 {
+		return fmt.Errorf("no account keys for storage account %q", vm.StorageAccount)
+	}
+
+	accountKey := *(*accountKeys)[0].Value
+	storageClient, err := storage.NewBasicClient(vm.StorageAccount, accountKey)
 	if err != nil {
 		return err
 	}
 
+	// Get a reference to the OS file.
 	blobStorageClient := storageClient.GetBlobService()
-	err = blobStorageClient.DeleteBlob(vm.StorageContainer, vm.OsFile, nil)
-	if err != nil {
+	container := blobStorageClient.GetContainerReference(vm.StorageContainer)
+	osFileBlob := container.GetBlobReference(vm.OsFile)
+
+	// Delete the OS file.
+	opts := &storage.DeleteBlobOptions{Timeout: 30} // 30s timeout
+	err = osFileBlob.Delete(opts)
+
+	if vm.DiskSize <= 0 {
 		return err
 	}
-	if vm.DiskSize <= 0 {
-		return nil
+
+	// Delete the disk file.
+	diskFileBlob := container.GetBlobReference(vm.DiskFile)
+	diskFileErr := diskFileBlob.Delete(opts)
+	if err != nil {
+		return fmt.Errorf("failed to delete OS file and disk file: %v, %v", err, diskFileErr)
 	}
 
-	return blobStorageClient.DeleteBlob(vm.StorageContainer, vm.DiskFile, nil)
+	return diskFileErr
 }
 
 // deleteNic deletes the network interface for the given VM from the VM's resource group, returns an error
 // if the operation does not succeed.
-func (vm *VM) deleteNic(authorizer *azure.ServicePrincipalToken) error {
+func (vm *VM) deleteNic(authorizer autorest.Authorizer) error {
 	interfaceClient := network.NewInterfacesClient(vm.Creds.SubscriptionID)
 	interfaceClient.Authorizer = authorizer
 
-	_, err := interfaceClient.Delete(vm.ResourceGroup, vm.Nic, nil)
-	return err
+	_, errc := interfaceClient.Delete(vm.ResourceGroup, vm.Nic, nil)
+	return <-errc
 }
 
 // deletePublicIP deletes the reserved Public IP of the given VM from the VM's resource group, returns an error
 // if the operation does not succeed.
-func (vm *VM) deletePublicIP(authorizer *azure.ServicePrincipalToken) error {
+func (vm *VM) deletePublicIP(authorizer autorest.Authorizer) error {
 	// Delete the Public IP of this VM
 	publicIPAddressesClient := network.NewPublicIPAddressesClient(vm.Creds.SubscriptionID)
 	publicIPAddressesClient.Authorizer = authorizer
 
-	_, err := publicIPAddressesClient.Delete(vm.ResourceGroup, vm.PublicIP, nil)
-	return err
+	_, errc := publicIPAddressesClient.Delete(vm.ResourceGroup, vm.PublicIP, nil)
+	return <-errc
 }
 
 // deleteDeployment deletes the deployed azure arm template for this vm.
-func (vm *VM) deleteDeployment(authorizer *azure.ServicePrincipalToken) error {
+func (vm *VM) deleteDeployment(authorizer autorest.Authorizer) error {
 	// Get the deployments client
 	deploymentsClient := resources.NewDeploymentsClient(vm.Creds.SubscriptionID)
 	deploymentsClient.Authorizer = authorizer
 
 	// Delete the deployment
-	_, err := deploymentsClient.Delete(vm.ResourceGroup, vm.DeploymentName, nil)
-	return err
+	_, errc := deploymentsClient.Delete(vm.ResourceGroup, vm.DeploymentName, nil)
+	return <-errc
 }
 
 func createDeployment(template string, params armParameters) (*resources.Deployment, error) {

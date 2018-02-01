@@ -4,11 +4,9 @@ package ssh
 
 import (
 	"bufio"
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"net"
 	"os"
 	"path"
@@ -39,8 +37,6 @@ var (
 	ErrUnableToWriteFile = errors.New("Unable to write file")
 	// ErrNotImplemented is returned when a function is not implemented (typically by the Mock implementation).
 	ErrNotImplemented = errors.New("Operation not implemented")
-	// Setup a mutex for the close channel for thread safety.
-	closeMutex sync.Mutex
 )
 
 const (
@@ -62,7 +58,7 @@ type Client interface {
 	Disconnect()
 	Download(src io.WriteCloser, dst string) error
 	Run(command string, stdout io.Writer, stderr io.Writer) error
-	Upload(src io.Reader, dst string, mode uint32) error
+	Upload(src io.Reader, dst string, size int, mode uint32) error
 	Validate() error
 	WaitForSSH(maxWait time.Duration) error
 
@@ -98,63 +94,6 @@ type SSHClient struct {
 	close        chan bool
 }
 
-// MockSSHClient represents a Mock Client wrapper.
-type MockSSHClient struct {
-	MockConnect    func() error
-	MockDisconnect func()
-	MockDownload   func(src io.WriteCloser, dst string) error
-	MockRun        func(command string, stdout io.Writer, stderr io.Writer) error
-	MockUpload     func(src io.Reader, dst string, mode uint32) error
-	MockValidate   func() error
-	MockWaitForSSH func(maxWait time.Duration) error
-
-	MockSetSSHPrivateKey func(string)
-	MockGetSSHPrivateKey func() string
-	MockSetSSHPassword   func(string)
-	MockGetSSHPassword   func() string
-}
-
-// dial will attempt to connect to an SSH server.
-var dial = func(network, addr string, config *cssh.ClientConfig) (*cssh.Client, error) {
-	d := net.Dialer{Timeout: Timeout, KeepAlive: 2 * time.Second}
-
-	conn, err := d.Dial(network, addr)
-	if err != nil {
-		return nil, err
-	}
-
-	c, chans, reqs, err := cssh.NewClientConn(conn, addr, config)
-	if err != nil {
-		return nil, err
-	}
-
-	return cssh.NewClient(c, chans, reqs), nil
-}
-
-var readPrivateKey = func(key string) (cssh.AuthMethod, error) {
-	signer, err := cssh.ParsePrivateKey([]byte(key))
-	if err != nil {
-		return nil, err
-	}
-
-	return cssh.PublicKeys(signer), nil
-}
-
-var getAuth = func(c *Credentials, authType string) (cssh.AuthMethod, error) {
-	var (
-		auth cssh.AuthMethod
-		err  error
-	)
-
-	switch authType {
-	case PasswordAuth:
-		return cssh.Password(c.SSHPassword), nil
-	case KeyAuth:
-		return readPrivateKey(c.SSHPrivateKey)
-	}
-	return auth, err
-}
-
 // Connect connects to a machine using SSH.
 func (client *SSHClient) Connect() error {
 	var (
@@ -183,6 +122,7 @@ func (client *SSHClient) Connect() error {
 		Auth: []cssh.AuthMethod{
 			auth,
 		},
+		HostKeyCallback: cssh.InsecureIgnoreHostKey(),
 	}
 
 	port := sshPort
@@ -197,12 +137,8 @@ func (client *SSHClient) Connect() error {
 
 	client.cryptoClient = c
 
-	closeMutex.Lock()
-	defer closeMutex.Unlock()
+	client.close = make(chan bool, 1)
 
-	if client.close == nil {
-		client.close = make(chan bool, 1)
-	}
 	if client.Options.KeepAlive > 0 {
 		go client.keepAlive()
 	}
@@ -226,17 +162,7 @@ func (client *SSHClient) keepAlive() {
 
 // Disconnect should be called when the ssh client is no longer needed, and state can be cleaned up
 func (client *SSHClient) Disconnect() {
-	select {
-	case <-client.close:
-	default:
-		closeMutex.Lock()
-		defer closeMutex.Unlock()
-
-		if client.close != nil {
-			close(client.close)
-			client.close = nil
-		}
-	}
+	client.close <- true
 }
 
 // Download downloads a file via SSH (SCP)
@@ -362,18 +288,14 @@ func (client *SSHClient) Run(command string, stdout io.Writer, stderr io.Writer)
 	return session.Run(command)
 }
 
-// Upload uploads a new file via SSH (SCP)
-func (client *SSHClient) Upload(src io.Reader, dst string, mode uint32) error {
-	fileContent, err := ioutil.ReadAll(src)
-	if err != nil {
-		return err
-	}
-
+// Upload uploads a new file via SSH (SCP). dst is the destination path for the
+// file on the remote machine. size is the number of bytes to be uploaded. mode
+// is the permissions the file should have, e.g. 0744.
+func (client *SSHClient) Upload(src io.Reader, dst string, size int, mode uint32) error {
 	session, err := client.cryptoClient.NewSession()
 	if err != nil {
 		return err
 	}
-
 	defer session.Close()
 
 	w, err := session.StdinPipe()
@@ -393,8 +315,8 @@ func (client *SSHClient) Upload(src io.Reader, dst string, mode uint32) error {
 		defer wg.Done()
 
 		// Signals to the SSH receiver that content is being passed.
-		fmt.Fprintf(w, "C%#o %d %s\n", mode, len(fileContent), remoteFileName)
-		_, err = io.Copy(w, bytes.NewReader(fileContent))
+		fmt.Fprintf(w, "C%#o %d %s\n", mode, size, remoteFileName)
+		_, err = io.Copy(w, src)
 		if err != nil {
 			errorChan <- err
 			return
@@ -485,4 +407,45 @@ func (client *SSHClient) GetSSHPassword() string {
 	client.Creds.mu.Lock()
 	defer client.Creds.mu.Unlock()
 	return client.Creds.SSHPassword
+}
+
+// dial will attempt to connect to an SSH server.
+var dial = func(network, addr string, config *cssh.ClientConfig) (*cssh.Client, error) {
+	d := net.Dialer{Timeout: Timeout, KeepAlive: 2 * time.Second}
+
+	conn, err := d.Dial(network, addr)
+	if err != nil {
+		return nil, err
+	}
+
+	c, chans, reqs, err := cssh.NewClientConn(conn, addr, config)
+	if err != nil {
+		return nil, err
+	}
+
+	return cssh.NewClient(c, chans, reqs), nil
+}
+
+var readPrivateKey = func(key string) (cssh.AuthMethod, error) {
+	signer, err := cssh.ParsePrivateKey([]byte(key))
+	if err != nil {
+		return nil, err
+	}
+
+	return cssh.PublicKeys(signer), nil
+}
+
+var getAuth = func(c *Credentials, authType string) (cssh.AuthMethod, error) {
+	var (
+		auth cssh.AuthMethod
+		err  error
+	)
+
+	switch authType {
+	case PasswordAuth:
+		return cssh.Password(c.SSHPassword), nil
+	case KeyAuth:
+		return readPrivateKey(c.SSHPrivateKey)
+	}
+	return auth, err
 }

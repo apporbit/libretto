@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014-2016 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2017 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18341,9 +18341,9 @@ func init() {
 type GuestPosixFileAttributes struct {
 	GuestFileAttributes
 
-	OwnerId     int32 `xml:"ownerId,omitempty"`
-	GroupId     int32 `xml:"groupId,omitempty"`
-	Permissions int64 `xml:"permissions,omitempty"`
+	OwnerId     *int32 `xml:"ownerId"`
+	GroupId     *int32 `xml:"groupId"`
+	Permissions int64  `xml:"permissions,omitempty"`
 }
 
 func init() {
@@ -28546,7 +28546,7 @@ func init() {
 type MethodActionArgument struct {
 	DynamicData
 
-	Value AnyType `xml:"value,omitempty,typeattr"`
+	Value AnyType `xml:"value,typeattr"`
 }
 
 func init() {
@@ -31074,7 +31074,7 @@ type OptionValue struct {
 	DynamicData
 
 	Key   string  `xml:"key"`
-	Value AnyType `xml:"value,omitempty,typeattr"`
+	Value AnyType `xml:"value,typeattr"`
 }
 
 func init() {
@@ -53154,8 +53154,8 @@ type WaitForUpdatesResponse struct {
 type WaitOptions struct {
 	DynamicData
 
-	MaxWaitSeconds   int32 `xml:"maxWaitSeconds,omitempty"`
-	MaxObjectUpdates int32 `xml:"maxObjectUpdates,omitempty"`
+	MaxWaitSeconds   *int32 `xml:"maxWaitSeconds"`
+	MaxObjectUpdates int32  `xml:"maxObjectUpdates,omitempty"`
 }
 
 func init() {

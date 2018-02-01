@@ -3,6 +3,7 @@
 package vsphere
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -12,10 +13,9 @@ import (
 	"strings"
 	"testing"
 
-	"golang.org/x/net/context"
-
 	"github.com/apcera/libretto/virtualmachine"
 	"github.com/vmware/govmomi"
+	"github.com/vmware/govmomi/nfc"
 	"github.com/vmware/govmomi/object"
 	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25"
@@ -58,11 +58,11 @@ type mockCollector struct {
 
 type mockLease struct {
 	MockLeaseProgress func(p int)
-	MockWait          func() (*types.HttpNfcLeaseInfo, error)
+	MockWait          func() (*nfc.LeaseInfo, error)
 	MockComplete      func() error
 }
 
-func (m mockLease) HTTPNfcLeaseProgress(p int) {
+func (m mockLease) Progress(p int) {
 	if m.MockLeaseProgress != nil {
 		m.MockLeaseProgress(p)
 	}
@@ -75,7 +75,7 @@ func (m mockLease) Complete() error {
 	return nil
 }
 
-func (m mockLease) Wait() (*types.HttpNfcLeaseInfo, error) {
+func (m mockLease) Wait() (*nfc.LeaseInfo, error) {
 	if m.MockWait != nil {
 		return m.MockWait()
 	}
@@ -547,7 +547,7 @@ func TestResetUnitNumbers(t *testing.T) {
 	vmSpec.ConfigSpec.DeviceChange = []types.BaseVirtualDeviceConfigSpec{
 		&types.VirtualDeviceConfigSpec{
 			Device: &types.VirtualDevice{
-				UnitNumber: 0,
+				UnitNumber: new(int32),
 			},
 		},
 	}
@@ -558,14 +558,14 @@ func TestResetUnitNumbers(t *testing.T) {
 	if len(s.DeviceChange) != 1 {
 		t.Fatalf("Expected only one device, got: %d", len(s.DeviceChange))
 	}
-	if n := s.DeviceChange[0].GetVirtualDeviceConfigSpec().Device.GetVirtualDevice().UnitNumber; n != -1 {
+	if n := s.DeviceChange[0].GetVirtualDeviceConfigSpec().Device.GetVirtualDevice().UnitNumber; *n != -1 {
 		t.Fatalf("Expected to get -1 for the unit number, got: %d", n)
 	}
 }
 
 func TestUploadOvfLeaseWaitError(t *testing.T) {
 	l := mockLease{
-		MockWait: func() (*types.HttpNfcLeaseInfo, error) {
+		MockWait: func() (*nfc.LeaseInfo, error) {
 			return nil, fmt.Errorf("Error waiting on the nfc lease")
 		},
 	}
@@ -574,133 +574,6 @@ func TestUploadOvfLeaseWaitError(t *testing.T) {
 	err := uploadOvf(&vm, &sr, l)
 	if err == nil {
 		t.Fatalf("Expected to get an error, got: %s", err)
-	}
-}
-
-func TestUploadOvfOpenError(t *testing.T) {
-	l := mockLease{
-		MockWait: func() (*types.HttpNfcLeaseInfo, error) {
-			li := types.HttpNfcLeaseInfo{
-				DeviceUrl: []types.HttpNfcLeaseDeviceUrl{
-					{
-						Url: "http://*/",
-					},
-				},
-			}
-			return &li, nil
-		},
-	}
-	var oldOpen = open
-	defer func() {
-		open = oldOpen
-	}()
-	expectedError := "failed to open file"
-	open = func(name string) (file *os.File, err error) {
-		return nil, fmt.Errorf(expectedError)
-	}
-	vm := VM{}
-	sr := types.OvfCreateImportSpecResult{
-		FileItem: []types.OvfFileItem{
-			{},
-		},
-	}
-	err := uploadOvf(&vm, &sr, l)
-	if err.Error() != expectedError {
-		t.Fatalf("Expected to get an error %s, got: %s", expectedError, err)
-	}
-}
-
-func TestUploadOvfCreateRequestError(t *testing.T) {
-	l := mockLease{
-		MockWait: func() (*types.HttpNfcLeaseInfo, error) {
-			li := types.HttpNfcLeaseInfo{
-				DeviceUrl: []types.HttpNfcLeaseDeviceUrl{
-					{
-						Url: "http://*/",
-					},
-				},
-			}
-			return &li, nil
-		},
-	}
-	fileName := "test"
-	var oldOpen = open
-	var oldCreateRequest = createRequest
-	defer func() {
-		open = oldOpen
-		createRequest = oldCreateRequest
-	}()
-	expectedError := "failed to create request"
-	open = func(name string) (file *os.File, err error) {
-		return os.Create(fileName)
-	}
-	createRequest = func(r io.Reader, method string, insecure bool, length int64, url string, contentType string) error {
-		return fmt.Errorf(expectedError)
-	}
-	defer func() {
-		err := os.RemoveAll(fileName)
-		if err != nil {
-			panic("Unable to remove temp file for test")
-		}
-	}()
-	vm := VM{}
-	sr := types.OvfCreateImportSpecResult{
-		FileItem: []types.OvfFileItem{
-			{},
-		},
-	}
-	err := uploadOvf(&vm, &sr, l)
-	if err.Error() != expectedError {
-		t.Fatalf("Expected to get an error %s, got: %s", expectedError, err)
-	}
-}
-
-func TestUploadOvfHappyPath(t *testing.T) {
-	l := mockLease{
-		MockWait: func() (*types.HttpNfcLeaseInfo, error) {
-			li := types.HttpNfcLeaseInfo{
-				DeviceUrl: []types.HttpNfcLeaseDeviceUrl{
-					{
-						Url: "http://*/",
-					},
-				},
-			}
-			return &li, nil
-		},
-	}
-	fileName := "test"
-	var oldOpen = open
-	var oldCreateRequest = createRequest
-	var oldNewProgressReader = NewProgressReader
-	defer func() {
-		open = oldOpen
-		createRequest = oldCreateRequest
-		NewProgressReader = oldNewProgressReader
-	}()
-	open = func(name string) (file *os.File, err error) {
-		return os.Create(fileName)
-	}
-	createRequest = func(r io.Reader, method string, insecure bool, length int64, url string, contentType string) error {
-		return nil
-	}
-	NewProgressReader = func(r io.Reader, t int64, l Lease) ProgressReader {
-		return mockProgressReader{}
-	}
-	defer func() {
-		err := os.RemoveAll(fileName)
-		if err != nil {
-			panic("Unable to remove temp file for test")
-		}
-	}()
-	vm := VM{}
-	sr := types.OvfCreateImportSpecResult{
-		FileItem: []types.OvfFileItem{
-			{},
-		},
-	}
-	err := uploadOvf(&vm, &sr, l)
-	if err != nil {
-		t.Fatalf("Expected to get no error, got: %s", err)
 	}
 }
 

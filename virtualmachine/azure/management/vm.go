@@ -24,9 +24,7 @@ const (
 	PrivateIP = 1
 
 	errGetClient      = "Error to retrieve Azure client %s"
-	errGetDeployment  = "Error to provision Azure VM %s"
 	errGetListService = "Error to list hosted services %s"
-	errMsgTimeout     = "Time out waiting for instance to %s"
 	errProvisionVM    = "Error to provision Azure VM %s"
 )
 

@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2015 VMware, Inc. All Rights Reserved.
+Copyright (c) 2015-2017 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -518,11 +518,11 @@ func (m snapshotMap) add(parent string, tree []types.VirtualMachineSnapshotTree)
 	}
 }
 
-// findSnapshot supports snapshot lookup by name, where name can be:
+// FindSnapshot supports snapshot lookup by name, where name can be:
 // 1) snapshot ManagedObjectReference.Value (unique)
 // 2) snapshot name (may not be unique)
 // 3) snapshot tree path (may not be unique)
-func (v VirtualMachine) findSnapshot(ctx context.Context, name string) (Reference, error) {
+func (v VirtualMachine) FindSnapshot(ctx context.Context, name string) (Reference, error) {
 	var o mo.VirtualMachine
 
 	err := v.Properties(ctx, v.Reference(), []string{"snapshot"}, &o)
@@ -550,7 +550,7 @@ func (v VirtualMachine) findSnapshot(ctx context.Context, name string) (Referenc
 
 // RemoveSnapshot removes a named snapshot
 func (v VirtualMachine) RemoveSnapshot(ctx context.Context, name string, removeChildren bool, consolidate *bool) (*Task, error) {
-	snapshot, err := v.findSnapshot(ctx, name)
+	snapshot, err := v.FindSnapshot(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +586,7 @@ func (v VirtualMachine) RevertToCurrentSnapshot(ctx context.Context, suppressPow
 
 // RevertToSnapshot reverts to a named snapshot
 func (v VirtualMachine) RevertToSnapshot(ctx context.Context, name string, suppressPowerOn bool) (*Task, error) {
-	snapshot, err := v.findSnapshot(ctx, name)
+	snapshot, err := v.FindSnapshot(ctx, name)
 	if err != nil {
 		return nil, err
 	}
@@ -724,4 +724,36 @@ func (v VirtualMachine) QueryConfigTarget(ctx context.Context) (*types.ConfigTar
 	}
 
 	return res.Returnval, nil
+}
+
+func (v VirtualMachine) MountToolsInstaller(ctx context.Context) error {
+	req := types.MountToolsInstaller{
+		This: v.Reference(),
+	}
+
+	_, err := methods.MountToolsInstaller(ctx, v.Client(), &req)
+	return err
+}
+
+func (v VirtualMachine) UnmountToolsInstaller(ctx context.Context) error {
+	req := types.UnmountToolsInstaller{
+		This: v.Reference(),
+	}
+
+	_, err := methods.UnmountToolsInstaller(ctx, v.Client(), &req)
+	return err
+}
+
+func (v VirtualMachine) UpgradeTools(ctx context.Context, options string) (*Task, error) {
+	req := types.UpgradeTools_Task{
+		This:             v.Reference(),
+		InstallerOptions: options,
+	}
+
+	res, err := methods.UpgradeTools_Task(ctx, v.Client(), &req)
+	if err != nil {
+		return nil, err
+	}
+
+	return NewTask(v.c, res.Returnval), nil
 }

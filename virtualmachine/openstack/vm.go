@@ -3,6 +3,7 @@
 package openstack
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -11,12 +12,12 @@ import (
 	"github.com/apcera/libretto/ssh"
 	"github.com/apcera/libretto/util"
 	lvm "github.com/apcera/libretto/virtualmachine"
-	"github.com/rackspace/gophercloud"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/extensions/floatingip"
-	ss "github.com/rackspace/gophercloud/openstack/compute/v2/extensions/startstop"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/flavors"
-	"github.com/rackspace/gophercloud/openstack/compute/v2/servers"
-	"github.com/rackspace/gophercloud/openstack/networking/v2/networks"
+	"github.com/gophercloud/gophercloud"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/floatingips"
+	ss "github.com/gophercloud/gophercloud/openstack/compute/v2/extensions/startstop"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/flavors"
+	"github.com/gophercloud/gophercloud/openstack/compute/v2/servers"
+	"github.com/gophercloud/gophercloud/openstack/networking/v2/networks"
 )
 
 // Compiler will complain if openstack.VM doesn't implement VirtualMachine interface.
@@ -142,7 +143,8 @@ type VM struct {
 	Volume Volume
 
 	// UUID of this instance (server). Set after provisioning
-	InstanceID string // optional
+	InstanceID string
+
 	// Instance Name of the VM (optional)
 	Name string
 
@@ -153,7 +155,7 @@ type VM struct {
 	// to the VM.
 	FloatingIPPool string
 	// FloatingIP is the object that stores the necessary floating ip information for this VM
-	FloatingIP *floatingip.FloatingIP
+	FloatingIP *floatingips.FloatingIP
 
 	// SecurityGroup represents the name of the security group to which this VM should belong
 	SecurityGroup string
@@ -172,6 +174,91 @@ type VM struct {
 	// computeClient represents the client to access to gophercloud compute api. It is set within Provision
 	// and set to nil in destroy.
 	computeClient *gophercloud.ServiceClient
+}
+
+// MarshalJSON serializes the VM object to JSON. It includes the FloatingIP.ID
+// field which would otherwise be omitted. We can't delete the floating IPs
+// during a Destroy() call without knowing the floating IP ID.
+func (vm *VM) MarshalJSON() ([]byte, error) {
+	// Make an alias of the VM type to avoid infinite recursion. This works
+	// because the alias does not have a MarshalJSON() method.
+	type (
+		// credsAlias prevents a mutex in ssh.Credentials from being copied.
+		credsAlias struct {
+			SSHUser       string
+			SSHPassword   string
+			SSHPrivateKey string
+		}
+		vmAlias struct {
+			IdentityEndpoint string
+			Username         string
+			Password         string
+			Region           string
+			TenantName       string
+			FlavorName       string
+			ImageID          string
+			ImageMetadata    ImageMetadata
+			ImagePath        string
+			Volume           Volume
+			InstanceID       string
+			Name             string
+			Networks         []string
+			FloatingIPPool   string
+			FloatingIP       *floatingips.FloatingIP
+			SecurityGroup    string
+			UserData         []byte
+			AdminPassword    string
+			Credentials      credsAlias
+		}
+	)
+
+	// Creating the alias in this way avoids copying the mutex in
+	// ssh.Credentials, which go vet doesn't like.
+	alias := vmAlias{
+		IdentityEndpoint: vm.IdentityEndpoint,
+		Username:         vm.Username,
+		Password:         vm.Password,
+		Region:           vm.Region,
+		TenantName:       vm.TenantName,
+		FlavorName:       vm.FlavorName,
+		ImageID:          vm.ImageID,
+		ImageMetadata:    vm.ImageMetadata,
+		ImagePath:        vm.ImagePath,
+		Volume:           vm.Volume,
+		InstanceID:       vm.InstanceID,
+		Name:             vm.Name,
+		Networks:         vm.Networks,
+		FloatingIPPool:   vm.FloatingIPPool,
+		FloatingIP:       vm.FloatingIP,
+		SecurityGroup:    vm.SecurityGroup,
+		UserData:         vm.UserData,
+		AdminPassword:    vm.AdminPassword,
+		Credentials: credsAlias{
+			SSHUser:       vm.Credentials.SSHUser,
+			SSHPassword:   vm.Credentials.SSHPassword,
+			SSHPrivateKey: vm.Credentials.SSHPrivateKey,
+		},
+	}
+
+	b, err := json.Marshal(alias)
+	if err != nil {
+		return nil, err
+	}
+
+	// We have vm serialized to JSON, but it's missing the floating IP ID.
+	// Unmarshal it into a map[string]interface{}, add the floating IP ID back
+	// in, then serialize it again.
+	var temp interface{}
+	err = json.Unmarshal(b, &temp)
+	if err != nil {
+		return nil, err
+	}
+
+	m := temp.(map[string]interface{})
+	fip := m["FloatingIP"].(map[string]interface{})
+	fip["id"] = vm.FloatingIP.ID
+
+	return json.Marshal(m)
 }
 
 // GetName returns the name of the virtual machine
@@ -262,7 +349,7 @@ func (vm *VM) Provision() error {
 		return cleanup(fmt.Errorf("empty floating IP pool"))
 	}
 
-	fip, err := floatingip.Create(client, &floatingip.CreateOpts{
+	fip, err := floatingips.Create(client, &floatingips.CreateOpts{
 		Pool: vm.FloatingIPPool,
 	}).Extract()
 
@@ -270,9 +357,9 @@ func (vm *VM) Provision() error {
 		return cleanup(fmt.Errorf("unable to create a floating ip: %s", err))
 	}
 
-	err = floatingip.Associate(client, server.ID, fip.IP).ExtractErr()
+	err = floatingips.AssociateInstance(client, server.ID, floatingips.AssociateOpts{FloatingIP: fip.IP}).ExtractErr()
 	if err != nil {
-		errFipDelete := floatingip.Delete(client, fip.ID).ExtractErr()
+		errFipDelete := floatingips.Delete(client, fip.ID).ExtractErr()
 		err = fmt.Errorf("%s %s", err, errFipDelete)
 		return cleanup(fmt.Errorf("unable to associate a floating ip: %s", err))
 	}
@@ -300,9 +387,7 @@ func (vm *VM) Provision() error {
 // returns nil if there was an error obtaining the IPs.
 func (vm *VM) GetIPs() ([]net.IP, error) {
 	server, err := getServer(vm)
-	if err != nil {
-	}
-	if server == nil {
+	if server == nil || err != nil {
 		// Probably need to call Provision first.
 		return nil, err
 	}
@@ -352,11 +437,11 @@ func (vm *VM) Destroy() error {
 	// Delete the floating IP first before destroying the VM
 	var errors []error
 	if vm.FloatingIP != nil {
-		err = floatingip.Disassociate(client, vm.InstanceID, vm.FloatingIP.IP).ExtractErr()
+		err = floatingips.DisassociateInstance(client, vm.InstanceID, floatingips.DisassociateOpts{FloatingIP: vm.FloatingIP.IP}).ExtractErr()
 		if err != nil {
 			errors = append(errors, fmt.Errorf("unable to disassociate floating ip from instance: %s", err))
 		} else {
-			err = floatingip.Delete(client, vm.FloatingIP.ID).ExtractErr()
+			err = floatingips.Delete(client, vm.FloatingIP.ID).ExtractErr()
 			if err != nil {
 				errors = append(errors, fmt.Errorf("unable to delete floating ip: %s", err))
 			}
@@ -372,7 +457,7 @@ func (vm *VM) Destroy() error {
 	}
 
 	// Delete the instance
-	err = deleteVM(client, vm)
+	err = deleteVM(client, vm.InstanceID)
 	if err != nil {
 		errors = append(errors, err)
 	}

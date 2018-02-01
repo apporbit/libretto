@@ -22,8 +22,8 @@ import (
 	lvm "github.com/apcera/libretto/virtualmachine"
 	"github.com/vmware/govmomi"
 	"github.com/vmware/govmomi/find"
+	"github.com/vmware/govmomi/nfc"
 	"github.com/vmware/govmomi/object"
-	"github.com/vmware/govmomi/property"
 	"github.com/vmware/govmomi/vim25/mo"
 	"github.com/vmware/govmomi/vim25/soap"
 	"github.com/vmware/govmomi/vim25/types"
@@ -68,7 +68,7 @@ func (v vmwareFinder) ResourcePoolList(c context.Context, p string) ([]*object.R
 }
 
 // NewLease creates a VMwareLease.
-var NewLease = func(ctx context.Context, lease *object.HttpNfcLease) Lease {
+var NewLease = func(ctx context.Context, lease *nfc.Lease) Lease {
 	return VMwareLease{
 		Ctx:   ctx,
 		Lease: lease,
@@ -78,23 +78,23 @@ var NewLease = func(ctx context.Context, lease *object.HttpNfcLease) Lease {
 // VMwareLease implements the Lease interface.
 type VMwareLease struct {
 	Ctx   context.Context
-	Lease *object.HttpNfcLease
+	Lease *nfc.Lease
 }
 
-// HTTPNfcLeaseProgress takes a percentage as an int and sets that percentage as
-// the completed percent.
-func (v VMwareLease) HTTPNfcLeaseProgress(p int32) {
-	v.Lease.HttpNfcLeaseProgress(v.Ctx, p)
+// Progress takes a percentage as an int and sets that percentage as the
+// completed percent.
+func (v VMwareLease) Progress(p int) {
+	v.Lease.Progress(v.Ctx, int32(p))
 }
 
 // Wait waits for the underlying lease to finish.
-func (v VMwareLease) Wait() (*types.HttpNfcLeaseInfo, error) {
-	return v.Lease.Wait(v.Ctx)
+func (v VMwareLease) Wait() (*nfc.LeaseInfo, error) {
+	return v.Lease.Wait(v.Ctx, nil)
 }
 
 // Complete marks the underlying lease as complete.
 func (v VMwareLease) Complete() error {
-	return v.Lease.HttpNfcLeaseComplete(v.Ctx)
+	return v.Lease.Complete(v.Ctx)
 }
 
 type Datastore struct {
@@ -262,7 +262,7 @@ func (r ReadProgress) StartProgress() {
 	r.wg.Add(1)
 	go func() {
 		var bytesReceived int64
-		var percent int32
+		var percent int
 		tick := time.NewTicker(5 * time.Second)
 		defer tick.Stop()
 		defer r.wg.Done()
@@ -270,10 +270,10 @@ func (r ReadProgress) StartProgress() {
 			select {
 			case b := <-r.ch:
 				bytesReceived += b
-				percent = int32((float32(bytesReceived) / float32(r.TotalBytes)) * 100)
+				percent = int((float32(bytesReceived) / float32(r.TotalBytes)) * 100)
 			case <-tick.C:
 				// TODO: Preet This can return an error as well, should return it
-				r.Lease.HTTPNfcLeaseProgress(percent)
+				r.Lease.Progress(percent)
 				if percent == 100 {
 					return
 				}
@@ -448,18 +448,6 @@ type finder interface {
 	SetDatacenter(*object.Datacenter) *find.Finder
 }
 
-type vmwareCollector struct {
-	collector *property.Collector
-}
-
-func (v vmwareCollector) RetrieveOne(c context.Context, mor types.ManagedObjectReference, ps []string, dst interface{}) error {
-	return v.collector.RetrieveOne(c, mor, ps, dst)
-}
-
-func (v vmwareCollector) Retrieve(c context.Context, mor []types.ManagedObjectReference, ps []string, dst interface{}) error {
-	return v.collector.Retrieve(c, mor, ps, dst)
-}
-
 type location struct {
 	Host         types.ManagedObjectReference
 	ResourcePool types.ManagedObjectReference
@@ -480,10 +468,10 @@ type Destination struct {
 	MOID string `json:"MOID"`
 }
 
-// Lease represents a type that wraps around a HTTPNfcLease
+// Lease represents a type that wraps around a nfc.Lease
 type Lease interface {
-	HTTPNfcLeaseProgress(int32)
-	Wait() (*types.HttpNfcLeaseInfo, error)
+	Progress(int)
+	Wait() (*nfc.LeaseInfo, error)
 	Complete() error
 }
 
@@ -587,7 +575,10 @@ func (vm *VM) Provision() (err error) {
 	}
 
 	// Cancel the sdk context
-	defer vm.cancel()
+	defer func() {
+		vm.client.Logout(vm.ctx)
+		vm.cancel()
+	}()
 
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
@@ -798,7 +789,10 @@ func (vm *VM) GetIPsAndId() ([]net.IP, string, error) {
 	if err := SetupSession(vm); err != nil {
 		return nil, "", err
 	}
-	defer vm.cancel()
+	defer func() {
+		vm.client.Logout(vm.ctx)
+		vm.cancel()
+	}()
 
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
@@ -825,7 +819,10 @@ func (vm *VM) Destroy() (err error) {
 	if err := SetupSession(vm); err != nil {
 		return err
 	}
-	defer vm.cancel()
+	defer func() {
+		vm.client.Logout(vm.ctx)
+		vm.cancel()
+	}()
 
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
@@ -1005,8 +1002,10 @@ func (vm *VM) GetState() (state string, err error) {
 	if err := SetupSession(vm); err != nil {
 		return "", lvm.ErrVMInfoFailed
 	}
-	defer vm.cancel()
-
+	defer func() {
+		vm.client.Logout(vm.ctx)
+		vm.cancel()
+	}()
 	state, err = getState(vm)
 	if err != nil {
 		return "", err
@@ -1028,7 +1027,11 @@ func (vm *VM) Suspend() (err error) {
 	if err := SetupSession(vm); err != nil {
 		return err
 	}
-	defer vm.cancel()
+
+	defer func() {
+		vm.client.Logout(vm.ctx)
+		vm.cancel()
+	}()
 
 	// Get a reference to the datacenter with host and vm folders populated
 	dcMo, err := GetDatacenter(vm)
@@ -1059,7 +1062,11 @@ func (vm *VM) Halt() (err error) {
 	if err := SetupSession(vm); err != nil {
 		return err
 	}
-	defer vm.cancel()
+	defer func() {
+		vm.client.Logout(vm.ctx)
+		vm.cancel()
+	}()
+
 	return halt(vm)
 }
 
@@ -1086,7 +1093,11 @@ func (vm *VM) Start() (err error) {
 	if err := SetupSession(vm); err != nil {
 		return err
 	}
-	defer vm.cancel()
+	defer func() {
+		vm.client.Logout(vm.ctx)
+		vm.cancel()
+	}()
+
 	return start(vm)
 }
 

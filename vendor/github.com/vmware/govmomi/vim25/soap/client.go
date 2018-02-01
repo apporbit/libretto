@@ -1,5 +1,5 @@
 /*
-Copyright (c) 2014-2015 VMware, Inc. All Rights Reserved.
+Copyright (c) 2014-2017 VMware, Inc. All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -58,6 +58,10 @@ const (
 	DefaultMinVimVersion = "5.5"
 )
 
+type header struct {
+	Cookie string `xml:"vcSessionCookie,omitempty"`
+}
+
 type Client struct {
 	http.Client
 
@@ -73,6 +77,8 @@ type Client struct {
 	Namespace string // Vim namespace
 	Version   string // Vim version
 	UserAgent string
+
+	header *header
 }
 
 var schemeMatch = regexp.MustCompile(`^\w+://`)
@@ -145,6 +151,32 @@ func NewClient(u *url.URL, insecure bool) *Client {
 	c.Version = DefaultVimVersion
 
 	return &c
+}
+
+// NewServiceClient creates a NewClient with the given URL.Path and namespace.
+func (c *Client) NewServiceClient(path string, namespace string) *Client {
+	u := c.URL()
+	u.Path = path
+
+	client := NewClient(u, c.k)
+
+	client.Namespace = namespace
+
+	// Copy the cookies
+	client.Client.Jar.SetCookies(u, c.Client.Jar.Cookies(u))
+
+	// Set SOAP Header cookie
+	for _, cookie := range client.Jar.Cookies(u) {
+		if cookie.Name == "vmware_soap_session" {
+			client.header = &header{
+				Cookie: cookie.Value,
+			}
+
+			break
+		}
+	}
+
+	return client
 }
 
 // SetRootCAs defines the set of root certificate authorities
@@ -401,6 +433,8 @@ func (c *Client) RoundTrip(ctx context.Context, reqBody, resBody HasFault) error
 	reqEnv := Envelope{Body: reqBody}
 	resEnv := Envelope{Body: resBody}
 
+	reqEnv.Header = c.header
+
 	// Create debugging context for this round trip
 	d := c.d.newRoundTrip()
 	if d.enabled() {
@@ -621,7 +655,40 @@ func (c *Client) Download(u *url.URL, param *Download) (io.ReadCloser, int64, er
 		return nil, 0, err
 	}
 
-	return res.Body, res.ContentLength, nil
+	r := res.Body
+
+	return r, res.ContentLength, nil
+}
+
+func (c *Client) WriteFile(file string, src io.Reader, size int64, s progress.Sinker) error {
+	var err error
+
+	r := src
+
+	fh, err := os.Create(file)
+	if err != nil {
+		return err
+	}
+
+	if s != nil {
+		pr := progress.NewReader(s, src, size)
+		src = pr
+
+		// Mark progress reader as done when returning from this function.
+		defer func() {
+			pr.Done(err)
+		}()
+	}
+
+	_, err = io.Copy(fh, r)
+
+	cerr := fh.Close()
+
+	if err == nil {
+		err = cerr
+	}
+
+	return err
 }
 
 // DownloadFile GETs the given URL to a local file
@@ -635,37 +702,6 @@ func (c *Client) DownloadFile(file string, u *url.URL, param *Download) error {
 	if err != nil {
 		return err
 	}
-	defer rc.Close()
 
-	var r io.Reader = rc
-
-	fh, err := os.Create(file)
-	if err != nil {
-		return err
-	}
-	defer fh.Close()
-
-	if param.Progress != nil {
-		pr := progress.NewReader(param.Progress, r, contentLength)
-		r = pr
-
-		// Mark progress reader as done when returning from this function.
-		defer func() {
-			pr.Done(err)
-		}()
-	}
-
-	_, err = io.Copy(fh, r)
-	if err != nil {
-		return err
-	}
-
-	// Assign error before returning so that it gets picked up by the deferred
-	// function marking the progress reader as done.
-	err = fh.Close()
-	if err != nil {
-		return err
-	}
-
-	return nil
+	return c.WriteFile(file, rc, contentLength, param.Progress)
 }

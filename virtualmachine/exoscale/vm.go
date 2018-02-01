@@ -11,7 +11,7 @@ import (
 	"github.com/apcera/libretto/ssh"
 	"github.com/apcera/libretto/util"
 	"github.com/apcera/libretto/virtualmachine"
-	"github.com/pyr/egoscale/src/egoscale"
+	"github.com/pyr/egoscale"
 )
 
 // VM represents an Exoscale virtual machine.

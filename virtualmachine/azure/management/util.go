@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"sync"
-	"time"
 
 	lvm "github.com/apcera/libretto/virtualmachine"
 
@@ -144,23 +143,6 @@ func (vm *VM) serviceExist(services []hostedservice.HostedService) bool {
 	}
 
 	return false
-}
-
-// waitForReady waits for the VM to go into the desired state.
-func (vm *VM) waitForReady(timeout int, targetState string) error {
-	for i := 0; i < timeout; i++ {
-		state, err := vm.GetState()
-		if err != nil {
-			return err
-		}
-
-		if state == targetState {
-			return nil
-		}
-
-		time.Sleep(1 * time.Second)
-	}
-	return fmt.Errorf(errMsgTimeout, virtualmachine.DeploymentStatusRunning)
 }
 
 func (vm *VM) getDeploymentOptions() virtualmachine.CreateDeploymentOptions {

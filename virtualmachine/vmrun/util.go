@@ -3,6 +3,7 @@
 package vmrun
 
 import (
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -19,9 +20,17 @@ func copyDir(src string, dest string) error {
 		return err
 	}
 
-	dir, _ := os.Open(src)
+	dir, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer dir.Close()
+
 	// Pass -1 to Readdir to make it read everything into a single slice
 	children, err := dir.Readdir(-1)
+	if err != nil {
+		return fmt.Errorf("failed to read files from directory %q: %v", src, err)
+	}
 
 	for _, child := range children {
 		newSrc := filepath.Join(src, child.Name())
