@@ -447,28 +447,39 @@ var findVM = func(vm *VM, searchFilter VMSearchFilter) (*mo.VirtualMachine,
 	return moVM, vm.answerQuestion(moVM)
 }
 
+// addCustomField: adds custom field for given field name
+func addCustomField(vm *VM, fieldName string, moType string) (int32, error) {
+	fieldsManager, err := object.GetCustomFieldsManager(vm.client.Client)
+	if err != nil {
+		return -1, err
+	}
+
+	key, err := fieldsManager.FindKey(vm.ctx, fieldName)
+	if err != nil {
+		if err == object.ErrKeyNameNotFound {
+			field, err := fieldsManager.Add(vm.ctx, fieldName, moType,
+				nil, nil)
+			if err != nil {
+				return -1, err
+			}
+			key = field.Key
+		} else {
+			return -1, err
+		}
+	}
+
+	return key, nil
+}
+
 // setCustomField: sets custom field and value for given vm/template
 func setCustomField(vm *VM, vmMo *mo.VirtualMachine, fieldName string,
-	fieldValue string) error {
+	moType string, fieldValue string) error {
 	fieldsManager, err := object.GetCustomFieldsManager(vm.client.Client)
 	if err != nil {
 		return err
 	}
 
-	key, err := fieldsManager.FindKey(vm.ctx, fieldName)
-	if err != nil {
-		if err.Error() == "key name not found" {
-			_, err := fieldsManager.Add(vm.ctx, fieldName, "VirtualMachine",
-				nil, nil)
-			if err != nil {
-				return err
-			}
-		} else {
-			return err
-		}
-	}
-
-	key, err = fieldsManager.FindKey(vm.ctx, fieldName)
+	key, err := addCustomField(vm, fieldName, moType)
 	if err != nil {
 		return err
 	}
