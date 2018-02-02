@@ -41,6 +41,7 @@ const (
 	// Custom field name and value used to tag visor images
 	VISOR_FIELD = "template_type"
 	VISOR_VALUE = "visor"
+	MO_TYPE_VM  = "VirtualMachine"
 
 	// Constants for supproted values for Flavor:Name
 	FlavorSmall   = "small"
@@ -1737,24 +1738,10 @@ func GetVmList(vm *VM, markedTemplate bool, markedVisor bool) (
 	var key int32
 	key = -1
 	if markedVisor {
-		fieldsManager, err := object.GetCustomFieldsManager(vm.client.Client)
+		key, err = addCustomField(vm, VISOR_FIELD, MO_TYPE_VM)
 		if err != nil {
 			return nil, err
 		}
-
-		key, err = fieldsManager.FindKey(vm.ctx, VISOR_FIELD)
-		if err != nil {
-			if err.Error() == "key name not found" {
-				_, err := fieldsManager.Add(vm.ctx, VISOR_FIELD, "VirtualMachine",
-					nil, nil)
-				if err != nil {
-					return nil, err
-				}
-			} else {
-				return nil, err
-			}
-		}
-		key, err = fieldsManager.FindKey(vm.ctx, VISOR_FIELD)
 	}
 
 	for _, vmProp := range vmPropList {
@@ -1770,7 +1757,11 @@ func GetVmList(vm *VM, markedTemplate bool, markedVisor bool) (
 			continue
 		}
 
-		if markedVisor && !isVisor(vmo, key) {
+		visorImage, err := isVisor(vmo, key)
+		if err != nil {
+			return nil, err
+		}
+		if markedVisor && !visorImage {
 			continue
 		}
 
@@ -1782,16 +1773,21 @@ func GetVmList(vm *VM, markedTemplate bool, markedVisor bool) (
 
 // isVisor: Returns true if template is Visor i.e. custom field is
 // set to appropriate value
-func isVisor(vmMo mo.VirtualMachine, key int32) bool {
+func isVisor(vmMo mo.VirtualMachine, key int32) (bool, error) {
 	values := vmMo.Summary.CustomValue
 	for _, value := range values {
 		if key == value.GetCustomFieldValue().Key {
-			if VISOR_VALUE == value.(*types.CustomFieldStringValue).Value {
-				return true
+			fieldValueStruct, ok := value.(*types.CustomFieldStringValue)
+			if !ok {
+				return false, fmt.Errorf("Custom field value of invalid type")
+			}
+			if VISOR_VALUE == fieldValueStruct.Value {
+				return true, nil
+
 			}
 		}
 	}
-	return false
+	return false, nil
 }
 
 // ConvertToTemplate : converts vm to vm template
@@ -1812,7 +1808,10 @@ func ConvertToTemplate(vm *VM) error {
 		return fmt.Errorf("error halting the VM: %v", err)
 	}
 
-	setCustomField(vm, vmMo, VISOR_FIELD, VISOR_VALUE)
+	err = setCustomField(vm, vmMo, VISOR_FIELD, MO_TYPE_VM, VISOR_VALUE)
+	if err != nil {
+		return fmt.Errorf("error in setting custom field: %v", err)
+	}
 
 	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 	err = vmo.MarkAsTemplate(vm.ctx)
