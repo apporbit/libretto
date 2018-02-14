@@ -1632,12 +1632,18 @@ func getOsDetails(vmMo mo.VirtualMachine) map[string]interface{} {
 	if vmMo.Guest == nil {
 		return osDetails
 	}
+
+	guestFullName := vmMo.Guest.GuestFullName
+	if guestFullName == "" {
+		guestFullName = vmMo.Config.GuestFullName
+	}
 	osDetails = map[string]interface{}{
 		"guest_id":        vmMo.Guest.GuestId,
 		"guest_family":    vmMo.Guest.GuestFamily,
-		"guest_full_name": vmMo.Guest.GuestFullName,
+		"guest_full_name": guestFullName,
 		"hostname":        vmMo.Guest.HostName,
 	}
+
 	return osDetails
 }
 
