@@ -1740,6 +1740,16 @@ func getState(vm *VM) (state string, err error) {
 	return vmMo.Guest.GuestState, nil
 }
 
+func getPowerState(vm *VM) (state string, err error) {
+	// Get a reference to the datacenter with host and vm folders populated
+	vmMo, err := findVM(vm, getVMSearchFilter(vm.Name))
+	if err != nil {
+		return "", lvm.ErrVMInfoFailed
+	}
+
+	return fmt.Sprintf("%s", vmMo.Runtime.PowerState), nil
+}
+
 // answerQuestion checks to see if there are currently pending questions on the
 // VM which prevent further actions. If so, it automatically responds to the
 // question based on the the vm.QuestionResponses map. If there is a problem
