@@ -878,6 +878,8 @@ func (vm *VM) Destroy() (err error) {
 		go func() {
 			defer timer.Stop()
 			defer wg.Done()
+
+			powerState := "unInitialized"
 		Outerloop:
 			for {
 				state, e := getState(vm)
@@ -886,14 +888,16 @@ func (vm *VM) Destroy() (err error) {
 					break
 				}
 
-				powerState, e := getPowerState(vm)
-				if e != nil {
-					err = e
-					break
-				}
+				if state == "notRunning" {
+					powerState, e = getPowerState(vm)
+					if e != nil {
+						err = e
+						break
+					}
 
-				if state == "notRunning" && powerState == "poweredOff" {
-					break
+					if powerState == "poweredOff" {
+						break
+					}
 				}
 
 				if state == "running" {
@@ -907,7 +911,7 @@ func (vm *VM) Destroy() (err error) {
 				select {
 				case <-timer.C:
 					err = fmt.Errorf("timed out waiting for VM to power off."+
-						"Current GuestState: %s & PowerState: %s", state, powerState)
+						"Current GuestState: %s and PowerState: %s", state, powerState)
 					break Outerloop
 				default:
 					// No action
@@ -927,21 +931,9 @@ func (vm *VM) Destroy() (err error) {
 	}
 	vmo := object.NewVirtualMachine(vm.client.Client, vmMo.Reference())
 
-	state, e := getState(vm)
-	if e != nil {
-		return fmt.Errorf("Error while getting state before destroy: %v", e)
-	}
-
-	powerState, e := getPowerState(vm)
-	if e != nil {
-		return fmt.Errorf("Error while getting power state before destroy:"+
-			"%v", e)
-	}
-
 	destroyTask, err := vmo.Destroy(vm.ctx)
 	if err != nil {
-		return fmt.Errorf("error creating a destroy task on the vm: %v"+
-			"Current GuestState: %s & PowerState: %s", err, state, powerState)
+		return fmt.Errorf("error creating a destroy task on the vm: %v", err)
 	}
 	tInfo, err := destroyTask.WaitForResult(vm.ctx, nil)
 	if err != nil {
