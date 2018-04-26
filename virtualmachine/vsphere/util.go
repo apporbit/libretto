@@ -38,6 +38,7 @@ const (
 	GRAY_STATUS_CHECK_TIMEOUT  = 1 * time.Minute
 	GREEN_STATUS_CHECK_TIMEOUT = 10 * time.Minute
 	IPWAIT_TIMEOUT             = 1 * time.Hour
+	RESOURCE_POOL_DEPTH        = 8 // Maximum Resource pool tree depth
 )
 
 /*
