@@ -61,10 +61,6 @@ func Wait(ctx context.Context, c *Collector, obj types.ManagedObjectReference, p
 		},
 	}
 
-	if len(ps) == 0 {
-		req.Spec.PropSet[0].All = types.NewBool(true)
-	}
-
 	err = p.CreateFilter(ctx, req)
 	if err != nil {
 		return err
