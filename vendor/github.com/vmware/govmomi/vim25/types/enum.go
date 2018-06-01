@@ -32,11 +32,6 @@ const (
 	ActionParameterAlarm             = ActionParameter("alarm")
 )
 
-// Maximum Resource pool tree depth
-const (
-	RESOURCE_POOL_DEPTH = 8
-)
-
 func init() {
 	t["ActionParameter"] = reflect.TypeOf((*ActionParameter)(nil)).Elem()
 }

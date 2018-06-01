@@ -40,6 +40,10 @@ const (
 	IPWAIT_TIMEOUT             = 1 * time.Hour
 )
 
+const (
+	RESOURCE_POOL_DEPTH = 8
+)
+
 /*
  * The guest heartbeat. The heartbeat status is classified as:
  * gray - VMware Tools are not installed or not running.
@@ -871,7 +875,7 @@ func findResourcePoolListAtPath(vm *VM, path string, properties []string) ([]mo.
 func findResourcePoolByMOID(vm *VM, moid string) (*mo.ResourcePool, error) {
 	// get resource pool list in the vcenter server
 	rpListPath := "*/Resources"
-	for n := 0; n < types.RESOURCE_POOL_DEPTH; n++ {
+	for n := 0; n < RESOURCE_POOL_DEPTH; n++ {
 		rpListPath = rpListPath + "/*"
 		prop := []string{"name", "owner"}
 		rpList, _ := findResourcePoolListAtPath(vm, rpListPath, prop)

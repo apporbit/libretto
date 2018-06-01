@@ -376,7 +376,7 @@ func FromBytes(raw []byte) (u UUID, e error) {
 				"Length of memory object should be %d, is %d",
 				UUIDByteLen, len(raw)), len(raw)}
 	}
-	if u[8]&0xc0 != 0x80 {
+	if raw[8]&0xc0 != 0x80 {
 		return nil, &BadUUIDStringError{"Reserved bits used"}
 	}
 	return UUID(raw), nil

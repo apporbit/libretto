@@ -24,14 +24,14 @@ import (
 	"github.com/vmware/govmomi/vim25/types"
 )
 
-var ServiceInstance = types.ManagedObjectReference{
+var serviceInstance = types.ManagedObjectReference{
 	Type:  "ServiceInstance",
 	Value: "ServiceInstance",
 }
 
 func GetServiceContent(ctx context.Context, r soap.RoundTripper) (types.ServiceContent, error) {
 	req := types.RetrieveServiceContent{
-		This: ServiceInstance,
+		This: serviceInstance,
 	}
 
 	res, err := RetrieveServiceContent(ctx, r, &req)
@@ -44,7 +44,7 @@ func GetServiceContent(ctx context.Context, r soap.RoundTripper) (types.ServiceC
 
 func GetCurrentTime(ctx context.Context, r soap.RoundTripper) (*time.Time, error) {
 	req := types.CurrentTime{
-		This: ServiceInstance,
+		This: serviceInstance,
 	}
 
 	res, err := CurrentTime(ctx, r, &req)

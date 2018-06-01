@@ -1596,7 +1596,7 @@ func GetResourcePoolList(vm *VM) ([]map[string]interface{}, error) {
 
 	// get resource pool list in the vcenter server
 	rpListPath := "*/Resources"
-	for n := 0; n < types.RESOURCE_POOL_DEPTH; n++ {
+	for n := 0; n < RESOURCE_POOL_DEPTH; n++ {
 		rpListPath = rpListPath + "/*"
 		prop := []string{"name", "runtime", "summary", "owner", "config", "overallStatus"}
 		allRpMo, _ := findResourcePoolListAtPath(vm, rpListPath, prop)
