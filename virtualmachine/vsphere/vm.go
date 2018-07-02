@@ -612,7 +612,9 @@ type VM struct {
 	// linked clones.
 	UseLinkedClones bool
 	// Skip waiting for IP to be assigned to VM in create/start actions
-	SkipIPWait     bool `json:"skip_ip_wait"`
+	SkipIPWait bool `json:"skip_ip_wait"`
+	// NestedHV is a flag to enable nested hardware-assisted virtualization
+	NestedHV       bool `json:"nested_hv"`
 	uri            *url.URL
 	ctx            context.Context
 	cancel         context.CancelFunc
