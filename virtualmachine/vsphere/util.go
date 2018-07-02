@@ -943,7 +943,6 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 	}
 	hotAddMemory := true
 	hotAddCpu := true
-	nestedHV := true
 
 	if vm.Flavor.NumCPUs <= 0 {
 		vm.Flavor.NumCPUs = vmMo.Config.Hardware.NumCPU
@@ -958,7 +957,7 @@ var cloneFromTemplate = func(vm *VM, dcMo *mo.Datacenter, usableDatastores []str
 		MemoryMB:            vm.Flavor.MemoryMB,
 		MemoryHotAddEnabled: &hotAddMemory,
 		CpuHotAddEnabled:    &hotAddCpu,
-		NestedHVEnabled:     &nestedHV,
+		NestedHVEnabled:     &vm.NestedHV,
 	}
 	config.DeviceChange = deviceChangeSpec
 
