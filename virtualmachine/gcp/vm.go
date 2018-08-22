@@ -3,6 +3,7 @@
 package gcp
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -45,6 +46,7 @@ var (
 type VM struct {
 	Name        string
 	Description string
+	Region      string
 	Zone        string
 	MachineType string
 	Preemptible bool // Preemptible instances will be terminates after they run for 24 hours.
@@ -64,7 +66,7 @@ type VM struct {
 	Tags    []string //Instance Tags
 
 	AccountFile  string
-	account      accountFile
+	Account      AccountFile
 	SSHCreds     ssh.Credentials
 	SSHPublicKey string
 
@@ -206,7 +208,7 @@ type Account struct {
 	AccountFile string
 	// account: Represents a structure containing private key, client email
 	// and client ID parsed from AccountFile
-	account accountFile
+	Account AccountFile
 	// Scopes: Represents access scopes with which API call is made
 	Scopes []string
 }
@@ -225,9 +227,45 @@ type Project struct {
 	CreateTime string `json:"create_time,omitempty"`
 }
 
+// Packer visor image config for GCP cloud
+type GcpConfig struct {
+	AccountFile   string `json:"account_file"`
+	ProjectID     string `json:"project_id"`
+	SourceImage   string `json:"source_image"`
+	SSHUsername   string `json:"ssh_username,omitempty"`
+	Type          string `json:"type"`
+	Zone          string `json:"zone"`
+	StartupScript string `json:"startup_script_file"`
+	ImageName     string `json:"image_name,omitempty"`
+}
+
+// Packer visor image config for GCP cloud
+type VisorImageConfig struct {
+	Builders []GcpConfig `json:"builders"`
+}
+
 // GetName returns the name of the virtual machine.
 func (vm *VM) GetName() string {
 	return vm.Name
+}
+
+// Creates a visor image config required for packer 
+func (vm *VM) CreateVisorImageConfig(accountFile, packerConf string) ([]byte, error) {
+	var vig VisorImageConfig
+	var conf GcpConfig
+
+	conf.ImageName = vm.Name
+	conf.AccountFile = accountFile
+	conf.Zone = vm.Zone
+	conf.SourceImage = vm.SourceImage
+	conf.ProjectID = vm.Project
+	conf.Type = "googlecompute"
+	conf.StartupScript = packerConf
+	conf.SSHUsername = "apporbit"
+
+	vig.Builders = append(vig.Builders, conf)
+
+	return json.Marshal(vig)
 }
 
 // Provision creates a virtual machine on GCE. It returns an error if
@@ -524,6 +562,7 @@ func (vm *VM) GetZoneList() ([]Zone, error) {
 			Region:      regionName,
 			Status:      zone.Status,
 		})
+
 	}
 
 	return response, nil

@@ -6,10 +6,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"net/http"
-	"os"
 	"strings"
 	"time"
 	"context"
@@ -43,11 +41,18 @@ type googleResManService struct {
 	service *googleresourcemanager.Service
 }
 
-// accountFile represents the structure of the account file JSON file.
-type accountFile struct {
-	PrivateKey  string `json:"private_key"`
-	ClientEmail string `json:"client_email"`
-	ClientId    string `json:"client_id"`
+// AccountFile represents the structure of the account file JSON file.
+type AccountFile struct {
+	AuthProviderX509CertURL string `json:"auth_provider_x509_cert_url"`
+	AuthURI                 string `json:"auth_uri"`
+	ClientEmail             string `json:"client_email"`
+	ClientId                string `json:"client_id"`
+	ClientX509CertURL       string `json:"client_x509_cert_url"`
+	PrivateKey              string `json:"private_key"`
+	PrivateKeyId            string `json:"private_key_id"`
+	ProjectId               string `json:"project_id"`
+	TokenURI                string `json:"token_uri"`
+	Type                    string `json:"type"`
 }
 
 // getResManService processes the account file and returns the service object
@@ -56,15 +61,11 @@ func (acc *Account) getResManService() (*googleResManService, error) {
 	var err error
 	var client *http.Client
 
-	if err = parseAccountFile(&acc.account, acc.AccountFile); err != nil {
-		return nil, err
-	}
-
 	// Auth with AccountFile first if provided
-	if acc.account.PrivateKey != "" {
+	if acc.Account.PrivateKey != "" {
 		config := jwt.Config{
-			Email:      acc.account.ClientEmail,
-			PrivateKey: []byte(acc.account.PrivateKey),
+			Email:      acc.Account.ClientEmail,
+			PrivateKey: []byte(acc.Account.PrivateKey),
 			Scopes:     acc.Scopes,
 			TokenURL:   tokenURL,
 		}
@@ -90,15 +91,11 @@ func (vm *VM) getService() (*googleService, error) {
 	var err error
 	var client *http.Client
 
-	if err = parseAccountFile(&vm.account, vm.AccountFile); err != nil {
-		return nil, err
-	}
-
 	// Auth with AccountFile first if provided
-	if vm.account.PrivateKey != "" {
+	if vm.Account.PrivateKey != "" {
 		config := jwt.Config{
-			Email:      vm.account.ClientEmail,
-			PrivateKey: []byte(vm.account.PrivateKey),
+			Email:      vm.Account.ClientEmail,
+			PrivateKey: []byte(vm.Account.PrivateKey),
 			Scopes:     vm.Scopes,
 			TokenURL:   tokenURL,
 		}
@@ -443,26 +440,6 @@ func (vm *VM) region() string {
 func parseAccountJSON(result interface{}, jsonText string) error {
 	dec := json.NewDecoder(strings.NewReader(jsonText))
 	return dec.Decode(result)
-}
-
-func parseAccountFile(file *accountFile, account string) error {
-	if err := parseAccountJSON(file, account); err != nil {
-		if _, err = os.Stat(account); os.IsNotExist(err) {
-			return fmt.Errorf("error finding account file: %s", account)
-		}
-
-		bytes, err := ioutil.ReadFile(account)
-		if err != nil {
-			return fmt.Errorf("error reading account file from path '%s': %s", file, err)
-		}
-
-		err = parseAccountJSON(file, string(bytes))
-		if err != nil {
-			return fmt.Errorf("error parsing account file: %s", err)
-		}
-	}
-
-	return nil
 }
 
 func (svc *googleService) getSSHKey() string {
